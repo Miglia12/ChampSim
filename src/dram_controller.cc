@@ -343,18 +343,35 @@ DRAM_CHANNEL::queue_type::iterator DRAM_CHANNEL::schedule_packet()
 long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
 {
   long progress{0};
+
+  // Only process valid packets that are ready
   if (pkt->has_value() && pkt->value().ready_time <= current_time) {
     auto op_row = address_mapping.get_row(pkt->value().address);
     auto op_idx = bank_request_index(pkt->value().address);
 
+    // Check if bank is available for new request
     if (!bank_request[op_idx].valid && !bank_request[op_idx].under_refresh) {
+      // Check for row buffer hit
       bool row_buffer_hit = (bank_request[op_idx].open_row.has_value() && *(bank_request[op_idx].open_row) == op_row);
 
-      // this bank is now busy
-      auto row_charge_delay = champsim::chrono::clock::duration{bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD};
-      bank_request[op_idx] = {true,  row_buffer_hit,        false,
-                              false, std::optional{op_row}, current_time + tCAS + (row_buffer_hit ? champsim::chrono::clock::duration{} : row_charge_delay),
-                              pkt};
+      auto timing_delay = champsim::chrono::clock::duration{0};
+
+      // Only non-LOAD operations pay row access delays
+      if (pkt->value().type != access_type::LOAD) {
+        timing_delay = bank_request[op_idx].open_row.has_value() ? tRP + tRCD : // Close old row + activate new row
+                           tRCD;                                                // Just activate new row
+      }
+
+      // Initialize bank request
+      bank_request[op_idx] = {/* valid = */ true,
+                              /* row_buffer_hit = */ row_buffer_hit,
+                              /* need_refresh = */ false,
+                              /* under_refresh = */ false,
+                              /* open_row = */ std::optional{op_row},
+                              /* ready_time = */ current_time + tCAS + (row_buffer_hit ? champsim::chrono::clock::duration{} : timing_delay),
+                              /* pkt = */ pkt};
+
+      // Mark packet as scheduled
       pkt->value().scheduled = true;
       pkt->value().ready_time = champsim::chrono::clock::time_point::max();
 
@@ -508,7 +525,7 @@ void MEMORY_CONTROLLER::initiate_requests()
 }
 
 DRAM_CHANNEL::request_type::request_type(const typename champsim::channel::request_type& req)
-    : pf_metadata(req.pf_metadata), address(req.address), v_address(req.address), data(req.data), instr_depend_on_me(req.instr_depend_on_me)
+    : pf_metadata(req.pf_metadata), address(req.address), v_address(req.address), data(req.data), type(req.type), instr_depend_on_me(req.instr_depend_on_me)
 {
   asid[0] = req.asid[0];
   asid[1] = req.asid[1];
