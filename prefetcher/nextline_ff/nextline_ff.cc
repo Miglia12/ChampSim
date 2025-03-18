@@ -1,4 +1,4 @@
-#include "next_line.h"
+#include "nextline_ff.h"
 
 uint32_t next_line::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in)
