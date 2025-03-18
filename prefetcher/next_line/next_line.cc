@@ -4,7 +4,8 @@ uint32_t next_line::prefetcher_cache_operate(champsim::address addr, champsim::a
                                              uint32_t metadata_in)
 {
   champsim::block_number pf_addr{addr};
-  prefetch_line(champsim::address{pf_addr + 1}, true, metadata_in);
+  prefetch_line(champsim::address{pf_addr + 1}, true, metadata_in, false);
+  prefetch_line(champsim::address{pf_addr + 2}, false, metadata_in, true);
   return metadata_in;
 }
 

@@ -32,6 +32,8 @@
 #include "util/bits.h"
 #include "util/span.h"
 
+CACHE* CACHE::llc_static = nullptr;
+
 CACHE::CACHE(CACHE&& other)
     : operable(other),
 
@@ -573,8 +575,13 @@ long CACHE::invalidate_entry(champsim::address inval_addr)
   return std::distance(begin, inv_way);
 }
 
-bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata)
+bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata, bool prefetch_at_llc)
 {
+  // If we want to prefetch at LLC and we're not already the LLC
+  if (prefetch_at_llc && NAME != "LLC" && llc_static) {
+    // fmt::print("[{}] Forwarding prefetch to LLC for address: {}\n", NAME, pf_addr);
+    return llc_static->prefetch_line(pf_addr, fill_this_level, prefetch_metadata, false);
+  }
   ++sim_stats.pf_requested;
 
   if (std::size(internal_PQ) >= PQ_SIZE) {
@@ -598,12 +605,12 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
 // LCOV_EXCL_START exclude deprecated function
 bool CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata)
 {
-  return prefetch_line(champsim::address{pf_addr}, fill_this_level, prefetch_metadata);
+  return prefetch_line(champsim::address{pf_addr}, fill_this_level, prefetch_metadata, false);
 }
 
 bool CACHE::prefetch_line(uint64_t /*deprecated*/, uint64_t /*deprecated*/, uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata)
 {
-  return prefetch_line(champsim::address{pf_addr}, fill_this_level, prefetch_metadata);
+  return prefetch_line(champsim::address{pf_addr}, fill_this_level, prefetch_metadata, false);
 }
 // LCOV_EXCL_STOP
 
@@ -841,6 +848,12 @@ void CACHE::initialize()
 {
   impl_prefetcher_initialize();
   impl_initialize_replacement();
+
+  // If this is the LLC, set the static pointer
+  if (NAME == "LLC") {
+    fmt::print("[{}] Setting LLC static pointer to {}\n", NAME, static_cast<void*>(this));
+    llc_static = this;
+  }
 }
 
 void CACHE::begin_phase()
