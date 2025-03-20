@@ -1,11 +1,11 @@
-#include "spp_dev.h"
+#include "spp_tri.h"
 
 #include <cassert>
 #include <iostream>
 
-void spp_dev::prefetcher_initialize()
+void spp_tri::prefetcher_initialize()
 {
-  std::cout << "Initialize SIGNATURE TABLE" << std::endl;
+  std::cout << "Initialize SPP-TRI (SPP with three prefetch levels)" << std::endl;
   std::cout << "ST_SET: " << ST_SET << std::endl;
   std::cout << "ST_WAY: " << ST_WAY << std::endl;
   std::cout << "ST_TAG_BIT: " << ST_TAG_BIT << std::endl;
@@ -20,6 +20,11 @@ void spp_dev::prefetcher_initialize()
   std::cout << std::endl << "Initialize PREFETCH FILTER" << std::endl;
   std::cout << "FILTER_SET: " << FILTER_SET << std::endl;
 
+  std::cout << std::endl << "CONFIDENCE THRESHOLDS" << std::endl;
+  std::cout << "FILL_THRESHOLD (L2): " << FILL_THRESHOLD << std::endl;
+  std::cout << "MID_THRESHOLD (LLC): " << MID_THRESHOLD << std::endl;
+  std::cout << "PF_THRESHOLD (DRAM): " << PF_THRESHOLD << std::endl;
+
   // pass pointers
   ST._parent = this;
   PT._parent = this;
@@ -27,17 +32,17 @@ void spp_dev::prefetcher_initialize()
   GHR._parent = this;
 }
 
-void spp_dev::prefetcher_cycle_operate() {}
+void spp_tri::prefetcher_cycle_operate() {}
 
-uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
+uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                            uint32_t metadata_in)
 {
   champsim::page_number page{addr};
   uint32_t last_sig = 0, curr_sig = 0, depth = 0;
   std::vector<uint32_t> confidence_q(intern_->MSHR_SIZE);
 
-  typename spp_dev::offset_type::difference_type delta = 0;
-  std::vector<typename spp_dev::offset_type::difference_type> delta_q(intern_->MSHR_SIZE);
+  typename spp_tri::offset_type::difference_type delta = 0;
+  std::vector<typename spp_tri::offset_type::difference_type> delta_q(intern_->MSHR_SIZE);
 
   for (uint32_t i = 0; i < intern_->MSHR_SIZE; i++) {
     confidence_q[i] = 0;
@@ -57,7 +62,7 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
   ST.read_and_update_sig(addr, last_sig, curr_sig, delta);
 
   // Also check the prefetch filter in parallel to update global accuracy counters
-  FILTER.check(addr, spp_dev::L2C_DEMAND);
+  FILTER.check(addr, spp_tri::L2C_DEMAND);
 
   // Stage 2: Update delta patterns stored in PT
   if (last_sig)
@@ -78,17 +83,49 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
         champsim::address pf_addr{champsim::block_number{base_addr} + delta_q[i]};
 
         if (champsim::page_number{pf_addr} == page) { // Prefetch request is in the same physical page
-          if (FILTER.check(pf_addr, ((confidence_q[i] >= FILL_THRESHOLD) ? spp_dev::SPP_L2C_PREFETCH : spp_dev::SPP_LLC_PREFETCH))) {
-            prefetch_line(pf_addr, (confidence_q[i] >= FILL_THRESHOLD), 0); // Use addr (not base_addr) to obey the same physical page boundary
+          // Determine the prefetch type based on confidence level
+          spp_tri::FILTER_REQUEST filter_req;
+          bool fill_level = false;
+          bool use_llc = false;
 
+          if (confidence_q[i] >= FILL_THRESHOLD) {
+            // High confidence -> L2 prefetch
+            filter_req = spp_tri::SPP_L2C_PREFETCH;
+            fill_level = true;
+            use_llc = false;
+          } else if (confidence_q[i] >= MID_THRESHOLD) {
+            // Medium confidence -> LLC prefetch
+            filter_req = spp_tri::SPP_LLC_PREFETCH;
+            fill_level = true;
+            use_llc = true;
+          } else {
+            // Low confidence -> DRAM prefetch
+            filter_req = spp_tri::SPP_DRAM_PREFETCH;
+            fill_level = false;
+            use_llc = true;
+          }
+
+          if (FILTER.check(pf_addr, filter_req)) {
+            prefetch_line(pf_addr, fill_level, 0, use_llc);
+
+            // Only count L2 prefetches in GHR stats
             if (confidence_q[i] >= FILL_THRESHOLD) {
               GHR.pf_issued++;
               if (GHR.pf_issued > GLOBAL_COUNTER_MAX) {
                 GHR.pf_issued >>= 1;
                 GHR.pf_useful >>= 1;
               }
+
               if constexpr (SPP_DEBUG_PRINT) {
                 std::cout << "[ChampSim] SPP L2 prefetch issued GHR.pf_issued: " << GHR.pf_issued << " GHR.pf_useful: " << GHR.pf_useful << std::endl;
+              }
+            } else if (confidence_q[i] >= MID_THRESHOLD) {
+              if constexpr (SPP_DEBUG_PRINT) {
+                std::cout << "[ChampSim] SPP LLC prefetch issued" << std::endl;
+              }
+            } else {
+              if constexpr (SPP_DEBUG_PRINT) {
+                std::cout << "[ChampSim] SPP DRAM prefetch issued" << std::endl;
               }
             }
 
@@ -102,7 +139,7 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
           if constexpr (GHR_ON) {
             // Store this prefetch request in GHR to bootstrap SPP learning when
             // we see a ST miss (i.e., accessing a new page)
-            GHR.update_entry(curr_sig, confidence_q[i], spp_dev::offset_type{pf_addr}, delta_q[i]);
+            GHR.update_entry(curr_sig, confidence_q[i], spp_tri::offset_type{pf_addr}, delta_q[i]);
           }
         }
 
@@ -116,11 +153,6 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
       uint32_t set = get_hash(curr_sig) % PT_SET;
       base_addr += (PT.delta[set][lookahead_way] << LOG2_BLOCK_SIZE);
 
-      // PT.delta uses a 7-bit sign magnitude representation to generate
-      // sig_delta
-      // int sig_delta = (PT.delta[set][lookahead_way] < 0) ? ((((-1) *
-      // PT.delta[set][lookahead_way]) & 0x3F) + 0x40) :
-      // PT.delta[set][lookahead_way];
       auto sig_delta = (PT.delta[set][lookahead_way] < 0) ? (((-1) * PT.delta[set][lookahead_way]) + (1 << (SIG_DELTA_BIT - 1))) : PT.delta[set][lookahead_way];
       curr_sig = ((curr_sig << SIG_SHIFT) ^ sig_delta) & SIG_MASK;
     }
@@ -134,22 +166,22 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
   return metadata_in;
 }
 
-uint32_t spp_dev::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t spp_tri::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
   if constexpr (FILTER_ON) {
     if constexpr (SPP_DEBUG_PRINT) {
       std::cout << std::endl;
     }
-    FILTER.check(evicted_addr, spp_dev::L2C_EVICT);
+    FILTER.check(evicted_addr, spp_tri::L2C_EVICT);
   }
 
   return metadata_in;
 }
 
-void spp_dev::prefetcher_final_stats() {}
+void spp_tri::prefetcher_final_stats() {}
 
 // TODO: Find a good 64-bit hash function
-uint64_t spp_dev::get_hash(uint64_t key)
+uint64_t spp_tri::get_hash(uint64_t key)
 {
   // Robert Jenkins' 32 bit mix function
   key += (key << 12);
@@ -167,7 +199,7 @@ uint64_t spp_dev::get_hash(uint64_t key)
   return key;
 }
 
-void spp_dev::SIGNATURE_TABLE::read_and_update_sig(champsim::address addr, uint32_t& last_sig, uint32_t& curr_sig, typename offset_type::difference_type& delta)
+void spp_tri::SIGNATURE_TABLE::read_and_update_sig(champsim::address addr, uint32_t& last_sig, uint32_t& curr_sig, typename offset_type::difference_type& delta)
 {
   auto set = get_hash(champsim::page_number{addr}.to<uint64_t>()) % ST_SET;
   auto match = ST_WAY;
@@ -234,39 +266,20 @@ void spp_dev::SIGNATURE_TABLE::read_and_update_sig(champsim::address addr, uint3
   if constexpr (SPP_SANITY_CHECK) {
     // Assertion
     if (match == ST_WAY) {
-      for (match = 0; match < ST_WAY; match++) {
-        if (lru[set][match] == ST_WAY - 1) { // Find replacement victim
-          tag[set][match] = partial_page;
-          sig[set][match] = 0;
-          curr_sig = sig[set][match];
-          last_offset[set][match] = page_offset;
+      // Instead of asserting, select a random victim based on the address
+      match = champsim::page_number{addr}.to<uint64_t>() % ST_WAY;
 
-          if constexpr (SPP_DEBUG_PRINT) {
-            std::cout << "[ST] " << __func__ << " miss set: " << set << " way: " << match;
-            std::cout << " valid: " << valid[set][match] << " victim tag: " << std::hex << tag[set][match] << " new tag: " << partial_page;
-            std::cout << " sig: " << sig[set][match] << " last_offset: " << std::dec << page_offset << std::endl;
-          }
+      std::cout << "[ST] WARNING: Cannot find a replacement victim! Selecting random way: " << match << std::endl;
 
-          break;
-        }
-      }
+      tag[set][match] = partial_page;
+      sig[set][match] = 0;
+      curr_sig = sig[set][match];
+      last_offset[set][match] = page_offset;
 
-      if (match == ST_WAY) {
-        // Instead of asserting, select a random victim based on the address
-        match = champsim::page_number{addr}.to<uint64_t>() % ST_WAY;
-
-        std::cout << "[ST] WARNING: Cannot find a replacement victim! Selecting random way: " << match << std::endl;
-
-        tag[set][match] = partial_page;
-        sig[set][match] = 0;
-        curr_sig = sig[set][match];
-        last_offset[set][match] = page_offset;
-
-        if constexpr (SPP_DEBUG_PRINT) {
-          std::cout << "[ST] " << __func__ << " random replacement set: " << set << " way: " << match;
-          std::cout << " valid: " << valid[set][match] << " victim tag: " << std::hex << tag[set][match] << " new tag: " << partial_page;
-          std::cout << " sig: " << sig[set][match] << " last_offset: " << std::dec << page_offset << std::endl;
-        }
+      if constexpr (SPP_DEBUG_PRINT) {
+        std::cout << "[ST] " << __func__ << " random replacement set: " << set << " way: " << match;
+        std::cout << " valid: " << valid[set][match] << " victim tag: " << std::hex << tag[set][match] << " new tag: " << partial_page;
+        std::cout << " sig: " << sig[set][match] << " last_offset: " << std::dec << page_offset << std::endl;
       }
     }
   }
@@ -300,7 +313,7 @@ void spp_dev::SIGNATURE_TABLE::read_and_update_sig(champsim::address addr, uint3
   lru[set][match] = 0; // Promote to the MRU position
 }
 
-void spp_dev::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_type::difference_type curr_delta)
+void spp_tri::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_type::difference_type curr_delta)
 {
   // Update (sig, delta) correlation
   uint32_t set = get_hash(last_sig) % PT_SET, match = 0;
@@ -336,6 +349,18 @@ void spp_dev::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_t
       }
     }
 
+    if (victim_way == PT_WAY) {
+      // Instead of asserting, choose a random way to replace
+      victim_way = get_hash(last_sig) % PT_WAY;
+
+      std::cout << "[PT] WARNING: Cannot find a replacement victim! Selecting random way: " << victim_way << std::endl;
+
+      if constexpr (SPP_DEBUG_PRINT) {
+        std::cout << "[PT] " << __func__ << " random replacement sig: " << std::hex << last_sig << std::dec << " set: " << set << " way: " << victim_way
+                  << std::endl;
+      }
+    }
+
     delta[set][victim_way] = curr_delta;
     c_delta[set][victim_way] = 0;
     c_sig[set]++;
@@ -349,24 +374,10 @@ void spp_dev::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_t
       std::cout << "[PT] " << __func__ << " miss sig: " << std::hex << last_sig << std::dec << " set: " << set << " way: " << victim_way;
       std::cout << " delta: " << delta[set][victim_way] << " c_delta: " << c_delta[set][victim_way] << " c_sig: " << c_sig[set] << std::endl;
     }
-
-    if constexpr (SPP_SANITY_CHECK) {
-      if (victim_way == PT_WAY) {
-        // Instead of asserting, choose a random way to replace
-        victim_way = get_hash(last_sig) % PT_WAY;
-
-        std::cout << "[PT] WARNING: Cannot find a replacement victim! Selecting random way: " << victim_way << std::endl;
-
-        if constexpr (SPP_DEBUG_PRINT) {
-          std::cout << "[PT] " << __func__ << " random replacement sig: " << std::hex << last_sig << std::dec << " set: " << set << " way: " << victim_way
-                    << std::endl;
-        }
-      }
-    }
   }
 }
 
-void spp_dev::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& delta_q, std::vector<uint32_t>& confidence_q,
+void spp_tri::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& delta_q, std::vector<uint32_t>& confidence_q,
                                           uint32_t& lookahead_way, uint32_t& lookahead_conf, uint32_t& pf_q_tail, uint32_t& depth)
 {
   // Update (sig, delta) correlation
@@ -415,7 +426,7 @@ void spp_dev::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typenam
   }
 }
 
-bool spp_dev::PREFETCH_FILTER::check(champsim::address check_addr, FILTER_REQUEST filter_request)
+bool spp_tri::PREFETCH_FILTER::check(champsim::address check_addr, FILTER_REQUEST filter_request)
 {
   champsim::block_number cache_line{check_addr};
   auto hash = get_hash(cache_line.to<uint64_t>());
@@ -427,7 +438,7 @@ bool spp_dev::PREFETCH_FILTER::check(champsim::address check_addr, FILTER_REQUES
   }
 
   switch (filter_request) {
-  case spp_dev::SPP_L2C_PREFETCH:
+  case spp_tri::SPP_L2C_PREFETCH:
     if ((valid[quotient] || useful[quotient]) && remainder_tag[quotient] == remainder) {
       if constexpr (SPP_DEBUG_PRINT) {
         std::cout << "[FILTER] " << __func__ << " line is already in the filter check_addr: " << check_addr << " cache_line: " << cache_line;
@@ -448,7 +459,7 @@ bool spp_dev::PREFETCH_FILTER::check(champsim::address check_addr, FILTER_REQUES
     }
     break;
 
-  case spp_dev::SPP_LLC_PREFETCH:
+  case spp_tri::SPP_LLC_PREFETCH:
     if ((valid[quotient] || useful[quotient]) && remainder_tag[quotient] == remainder) {
       if constexpr (SPP_DEBUG_PRINT) {
         std::cout << "[FILTER] " << __func__ << " line is already in the filter check_addr: " << check_addr << " cache_line: " << cache_line;
@@ -457,23 +468,36 @@ bool spp_dev::PREFETCH_FILTER::check(champsim::address check_addr, FILTER_REQUES
 
       return false; // False return indicates "Do not prefetch"
     } else {
-      // NOTE: SPP_LLC_PREFETCH has relatively low confidence (FILL_THRESHOLD <= SPP_LLC_PREFETCH < PF_THRESHOLD)
-      // Therefore, it is safe to prefetch this cache line in the large LLC and save precious L2C capacity
-      // If this prefetch request becomes more confident and SPP eventually issues SPP_L2C_PREFETCH,
-      // we can get this cache line immediately from the LLC (not from DRAM)
-      // To allow this fast prefetch from LLC, SPP does not set the valid bit for SPP_LLC_PREFETCH
-
-      // valid[quotient] = 1;
-      // useful[quotient] = 0;
+      // For LLC prefetches, we don't set the valid bit so that higher confidence prefetches can still proceed
+      remainder_tag[quotient] = remainder;
 
       if constexpr (SPP_DEBUG_PRINT) {
-        std::cout << "[FILTER] " << __func__ << " don't set valid for check_addr: " << check_addr << " cache_line: " << cache_line;
+        std::cout << "[FILTER] " << __func__ << " LLC prefetch for check_addr: " << check_addr << " cache_line: " << cache_line;
         std::cout << " quotient: " << quotient << " valid: " << valid[quotient] << " useful: " << useful[quotient] << std::endl;
       }
     }
     break;
 
-  case spp_dev::L2C_DEMAND:
+  case spp_tri::SPP_DRAM_PREFETCH:
+    if ((valid[quotient] || useful[quotient]) && remainder_tag[quotient] == remainder) {
+      if constexpr (SPP_DEBUG_PRINT) {
+        std::cout << "[FILTER] " << __func__ << " line is already in the filter check_addr: " << check_addr << " cache_line: " << cache_line;
+        std::cout << " quotient: " << quotient << " valid: " << valid[quotient] << " useful: " << useful[quotient] << std::endl;
+      }
+
+      return false; // False return indicates "Do not prefetch"
+    } else {
+      // For DRAM prefetches, we don't set the valid bit at all
+      // This allows future prefetches to the same address with higher confidence to be processed
+
+      if constexpr (SPP_DEBUG_PRINT) {
+        std::cout << "[FILTER] " << __func__ << " DRAM prefetch for check_addr: " << check_addr << " cache_line: " << cache_line;
+        std::cout << " quotient: " << quotient << " valid: " << valid[quotient] << " useful: " << useful[quotient] << std::endl;
+      }
+    }
+    break;
+
+  case spp_tri::L2C_DEMAND:
     if ((remainder_tag[quotient] == remainder) && (useful[quotient] == 0)) {
       useful[quotient] = 1;
       if (valid[quotient])
@@ -487,7 +511,7 @@ bool spp_dev::PREFETCH_FILTER::check(champsim::address check_addr, FILTER_REQUES
     }
     break;
 
-  case spp_dev::L2C_EVICT:
+  case spp_tri::L2C_EVICT:
     // Decrease global pf_useful counter when there is a useless prefetch (prefetched but not used)
     if (valid[quotient] && !useful[quotient] && _parent->GHR.pf_useful)
       _parent->GHR.pf_useful--;
@@ -507,7 +531,7 @@ bool spp_dev::PREFETCH_FILTER::check(champsim::address check_addr, FILTER_REQUES
   return true;
 }
 
-void spp_dev::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confidence, offset_type pf_offset, typename offset_type::difference_type pf_delta)
+void spp_tri::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confidence, offset_type pf_offset, typename offset_type::difference_type pf_delta)
 {
   // NOTE: GHR implementation is slightly different from the original paper
   // Instead of matching (last_offset + delta), GHR simply stores and matches the pf_offset
@@ -519,8 +543,6 @@ void spp_dev::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
   }
 
   for (uint32_t i = 0; i < MAX_GHR_ENTRY; i++) {
-    // if (sig[i] == pf_sig) { // TODO: Which one is better and consistent?
-    //  If GHR already holds the same pf_sig, update the GHR entry with the latest info
     if (valid[i] && (offset[i] == pf_offset)) {
       // If GHR already holds the same pf_offset, update the GHR entry with the latest info
       sig[i] = pf_sig;
@@ -566,7 +588,7 @@ void spp_dev::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
   delta[victim_way] = pf_delta;
 }
 
-uint32_t spp_dev::GLOBAL_REGISTER::check_entry(offset_type page_offset)
+uint32_t spp_tri::GLOBAL_REGISTER::check_entry(offset_type page_offset)
 {
   uint32_t max_conf = 0, max_conf_way = MAX_GHR_ENTRY;
 
