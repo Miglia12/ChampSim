@@ -8,7 +8,6 @@
 #include "modules.h"
 #include "msl/lru_table.h"
 
-// SPP variant with three confidence levels (L2, LLC, DRAM)
 struct spp_tri : public champsim::modules::prefetcher {
 
   // SPP functional knobs
@@ -40,9 +39,9 @@ struct spp_tri : public champsim::modules::prefetcher {
   constexpr static unsigned REMAINDER_BIT = 6;
   constexpr static unsigned HASH_BIT = (QUOTIENT_BIT + REMAINDER_BIT + 1);
   constexpr static std::size_t FILTER_SET = (1 << QUOTIENT_BIT);
-  constexpr static uint32_t FILL_THRESHOLD = 90; // High confidence -> L2
-  constexpr static uint32_t MID_THRESHOLD = 50;  // Medium confidence -> LLC
-  constexpr static uint32_t PF_THRESHOLD = 25;   // Low confidence -> DRAM
+  constexpr static uint32_t FILL_THRESHOLD = 90;
+  constexpr static uint32_t PF_THRESHOLD = 25;
+  constexpr static uint32_t MIN_PF_THRESHOLD = 0; // Minimum threshold to issue any prefetch
 
   // Global register parameters
   constexpr static unsigned GLOBAL_COUNTER_BIT = 10;
@@ -58,7 +57,7 @@ struct spp_tri : public champsim::modules::prefetcher {
   void prefetcher_cycle_operate();
   void prefetcher_final_stats();
 
-  enum FILTER_REQUEST { SPP_L2C_PREFETCH, SPP_LLC_PREFETCH, SPP_DRAM_PREFETCH, L2C_DEMAND, L2C_EVICT }; // Request type for prefetch filter
+  enum FILTER_REQUEST { SPP_L2C_PREFETCH, SPP_LLC_PREFETCH, L2C_DEMAND, L2C_EVICT }; // Request type for prefetch filter
   static uint64_t get_hash(uint64_t key);
 
   struct block_in_page_extent : champsim::dynamic_extent {
@@ -138,6 +137,12 @@ struct spp_tri : public champsim::modules::prefetcher {
 
     bool check(champsim::address pf_addr, FILTER_REQUEST filter_request);
   };
+
+  // Statistics for different prefetch types
+  uint64_t stat_l2_prefetches = 0;
+  uint64_t stat_llc_prefetches = 0;
+  uint64_t stat_dram_prefetches = 0;
+  uint64_t stat_below_threshold = 0;
 
   class GLOBAL_REGISTER
   {
