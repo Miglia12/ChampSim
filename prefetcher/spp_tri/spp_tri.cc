@@ -5,7 +5,7 @@
 
 void spp_tri::prefetcher_initialize()
 {
-  std::cout << "Initialize SPP-TRI SIGNATURE TABLE" << std::endl;
+  std::cout << "Initialize SIGNATURE TABLE" << std::endl;
   std::cout << "ST_SET: " << ST_SET << std::endl;
   std::cout << "ST_WAY: " << ST_WAY << std::endl;
   std::cout << "ST_TAG_BIT: " << ST_TAG_BIT << std::endl;
@@ -19,11 +19,9 @@ void spp_tri::prefetcher_initialize()
 
   std::cout << std::endl << "Initialize PREFETCH FILTER" << std::endl;
   std::cout << "FILTER_SET: " << FILTER_SET << std::endl;
-  std::cout << "Special SPP-TRI mode: 3 confidence levels" << std::endl;
-  std::cout << "- High confidence (>=" << FILL_THRESHOLD << "): L2 prefetch" << std::endl;
-  std::cout << "- Medium confidence (>=" << PF_THRESHOLD << "): LLC prefetch" << std::endl;
-  std::cout << "- Low confidence (>=" << MIN_PF_THRESHOLD << "): DRAM row open" << std::endl;
-  std::cout << "- Below threshold (<" << MIN_PF_THRESHOLD << "): No prefetch" << std::endl;
+
+  // Initialize the SPP-Tri special DRAM prefetch counter
+  special_dram_pf_issued = 0;
 
   // pass pointers
   ST._parent = this;
@@ -33,6 +31,35 @@ void spp_tri::prefetcher_initialize()
 }
 
 void spp_tri::prefetcher_cycle_operate() {}
+
+void spp_tri::issue_dram_prefetches(uint32_t curr_sig, champsim::address base_addr, uint32_t metadata_in)
+{
+  uint32_t set = get_hash(curr_sig) % PT_SET;
+
+  // Only process if there are any signatures in this set
+  if (PT.c_sig[set]) {
+    for (uint32_t way = 0; way < PT_WAY; way++) {
+      // Calculate confidence for this pattern
+      uint32_t local_conf = (100 * PT.c_delta[set][way]) / PT.c_sig[set];
+
+      // Check if this is a low-confidence pattern (above 0 but below threshold)
+      if (local_conf > 0 && local_conf < PF_THRESHOLD) {
+        // Calculate prefetch address using the delta
+        champsim::address pf_addr{champsim::block_number{base_addr} + PT.delta[set][way]};
+
+        // Issue the DRAM prefetch - we don't check page boundaries here
+        if (prefetch_line(pf_addr, false, metadata_in, true)) {
+          special_dram_pf_issued++;
+
+          if constexpr (SPP_DEBUG_PRINT) {
+            std::cout << "[ChampSim] SPP-Tri DRAM prefetch issued: " << pf_addr;
+            std::cout << " confidence: " << local_conf << " delta: " << PT.delta[set][way] << std::endl;
+          }
+        }
+      }
+    }
+  }
+}
 
 uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                            uint32_t metadata_in)
@@ -73,72 +100,50 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
   uint32_t lookahead_conf = 100, pf_q_head = 0, pf_q_tail = 0;
   uint8_t do_lookahead = 0;
 
+  // SPP-Tri: Issue low-confidence DRAM prefetches from current signature
+  issue_dram_prefetches(curr_sig, base_addr, metadata_in);
+
   do {
     uint32_t lookahead_way = PT_WAY;
     PT.read_pattern(curr_sig, delta_q, confidence_q, lookahead_way, lookahead_conf, pf_q_tail, depth);
 
     do_lookahead = 0;
     for (uint32_t i = pf_q_head; i < pf_q_tail; i++) {
-      // **** SPP-TRI modification: Expand to consider all deltas, even low confidence ones ****
-      champsim::address pf_addr{champsim::block_number{base_addr} + delta_q[i]};
+      // Original SPP prefetching logic for high-confidence entries
+      if (confidence_q[i] >= PF_THRESHOLD) {
+        champsim::address pf_addr{champsim::block_number{base_addr} + delta_q[i]};
 
-      if (champsim::page_number{pf_addr} == page) { // Prefetch request is in the same physical page
-        if (confidence_q[i] >= FILL_THRESHOLD) {
-          // High confidence: prefetch to L2 cache
-          if (FILTER.check(pf_addr, spp_tri::SPP_L2C_PREFETCH)) {
-            prefetch_line(pf_addr, true, 0); // Fill L2 cache
-            stat_l2_prefetches++;            // Track L2 prefetches
+        if (champsim::page_number{pf_addr} == page) { // Prefetch request is in the same physical page
+          if (FILTER.check(pf_addr, ((confidence_q[i] >= FILL_THRESHOLD) ? spp_tri::SPP_L2C_PREFETCH : spp_tri::SPP_LLC_PREFETCH))) {
+            prefetch_line(pf_addr, (confidence_q[i] >= FILL_THRESHOLD), 0); // Use addr (not base_addr) to obey the same physical page boundary
 
-            GHR.pf_issued++;
-            if (GHR.pf_issued > GLOBAL_COUNTER_MAX) {
-              GHR.pf_issued >>= 1;
-              GHR.pf_useful >>= 1;
+            if (confidence_q[i] >= FILL_THRESHOLD) {
+              GHR.pf_issued++;
+              if (GHR.pf_issued > GLOBAL_COUNTER_MAX) {
+                GHR.pf_issued >>= 1;
+                GHR.pf_useful >>= 1;
+              }
+              if constexpr (SPP_DEBUG_PRINT) {
+                std::cout << "[ChampSim] SPP L2 prefetch issued GHR.pf_issued: " << GHR.pf_issued << " GHR.pf_useful: " << GHR.pf_useful << std::endl;
+              }
             }
 
             if constexpr (SPP_DEBUG_PRINT) {
-              std::cout << "[ChampSim] SPP L2 prefetch issued GHR.pf_issued: " << GHR.pf_issued << " GHR.pf_useful: " << GHR.pf_useful << std::endl;
-              std::cout << "[ChampSim] " << __func__ << " base_addr: " << base_addr << " pf_addr: " << pf_addr << " prefetch_delta: " << delta_q[i]
-                        << " confidence: " << confidence_q[i] << " depth: " << i << " L2 FILL" << std::endl;
+              std::cout << "[ChampSim] " << __func__ << " base_addr: " << base_addr << " pf_addr: " << pf_addr;
+              std::cout << " prefetch_delta: " << delta_q[i] << " confidence: " << confidence_q[i];
+              std::cout << " depth: " << i << std::endl;
             }
           }
-        } else if (confidence_q[i] >= PF_THRESHOLD) {
-          // Medium confidence: prefetch to LLC
-          if (FILTER.check(pf_addr, spp_tri::SPP_LLC_PREFETCH)) {
-            prefetch_line(pf_addr, false, 0); // Fill LLC
-            stat_llc_prefetches++;            // Track LLC prefetches
-
-            if constexpr (SPP_DEBUG_PRINT) {
-              std::cout << "[ChampSim] " << __func__ << " base_addr: " << base_addr << " pf_addr: " << pf_addr << " prefetch_delta: " << delta_q[i]
-                        << " confidence: " << confidence_q[i] << " depth: " << i << " LLC FILL" << std::endl;
-            }
-          }
-        } else {
-          // Low confidence: just open DRAM row
-          prefetch_line(pf_addr, false, 0, true); // Open DRAM row
-
-          if constexpr (SPP_DEBUG_PRINT) {
-            std::cout << "[ChampSim] " << __func__ << " base_addr: " << base_addr << " pf_addr: " << pf_addr << " prefetch_delta: " << delta_q[i]
-                      << " confidence: " << confidence_q[i] << " depth: " << i << " DRAM ROW ONLY" << std::endl;
+        } else { // Prefetch request is crossing the physical page boundary
+          if constexpr (GHR_ON) {
+            // Store this prefetch request in GHR to bootstrap SPP learning when
+            // we see a ST miss (i.e., accessing a new page)
+            GHR.update_entry(curr_sig, confidence_q[i], spp_tri::offset_type{pf_addr}, delta_q[i]);
           }
         }
 
-        // Only continue lookahead for confident predictions
-        if (confidence_q[i] >= PF_THRESHOLD) {
-          do_lookahead = 1;
-          pf_q_head++;
-        }
-      } else { // Prefetch request is crossing the physical page boundary
-        if (confidence_q[i] >= PF_THRESHOLD && GHR_ON) {
-          // Store this prefetch request in GHR to bootstrap SPP learning when
-          // we see a ST miss (i.e., accessing a new page)
-          GHR.update_entry(curr_sig, confidence_q[i], spp_tri::offset_type{pf_addr}, delta_q[i]);
-        }
-
-        // Only continue lookahead for confident predictions
-        if (confidence_q[i] >= PF_THRESHOLD) {
-          do_lookahead = 1;
-          pf_q_head++;
-        }
+        do_lookahead = 1;
+        pf_q_head++;
       }
     }
 
@@ -151,6 +156,9 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
       // sig_delta
       auto sig_delta = (PT.delta[set][lookahead_way] < 0) ? (((-1) * PT.delta[set][lookahead_way]) + (1 << (SIG_DELTA_BIT - 1))) : PT.delta[set][lookahead_way];
       curr_sig = ((curr_sig << SIG_SHIFT) ^ sig_delta) & SIG_MASK;
+
+      // SPP-Tri: Issue low-confidence DRAM prefetches for the lookahead signature too
+      issue_dram_prefetches(curr_sig, base_addr, metadata_in);
     }
 
     if constexpr (SPP_DEBUG_PRINT) {
@@ -174,14 +182,7 @@ uint32_t spp_tri::prefetcher_cache_fill(champsim::address addr, long set, long w
   return metadata_in;
 }
 
-void spp_tri::prefetcher_final_stats()
-{
-  std::cout << "SPP-TRI final stats:" << std::endl;
-  std::cout << "  L2 prefetches issued: " << stat_l2_prefetches << std::endl;
-  std::cout << "  LLC prefetches issued: " << stat_llc_prefetches << std::endl;
-  std::cout << "  DRAM row opens issued: " << stat_dram_prefetches << std::endl;
-  std::cout << "  Patterns below threshold: " << stat_below_threshold << std::endl;
-}
+void spp_tri::prefetcher_final_stats() { std::cout << "SPP-Tri special DRAM prefetches issued: " << special_dram_pf_issued << std::endl; }
 
 // TODO: Find a good 64-bit hash function
 uint64_t spp_tri::get_hash(uint64_t key)
@@ -224,7 +225,6 @@ void spp_tri::SIGNATURE_TABLE::read_and_update_sig(champsim::address addr, uint3
 
         if (delta) {
           // Build a new sig based on 7-bit sign magnitude representation of delta
-          // sig_delta = (delta < 0) ? ((((-1) * delta) & 0x3F) + 0x40) : delta;
           sig_delta = (delta < 0) ? (((-1) * delta) + (1 << (SIG_DELTA_BIT - 1))) : delta;
           sig[set][match] = ((last_sig << SIG_SHIFT) ^ sig_delta) & SIG_MASK;
           curr_sig = sig[set][match];
@@ -412,30 +412,31 @@ void spp_tri::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typenam
       local_conf = (100 * c_delta[set][way]) / c_sig[set];
       pf_conf = depth ? (_parent->GHR.global_accuracy * c_delta[set][way] / c_sig[set] * lookahead_conf / 100) : local_conf;
 
-      // Add all patterns regardless of confidence - low confidence ones will just open DRAM rows
-      confidence_q[pf_q_tail] = pf_conf;
-      delta_q[pf_q_tail] = delta[set][way];
+      if (pf_conf >= PF_THRESHOLD) {
+        confidence_q[pf_q_tail] = pf_conf;
+        delta_q[pf_q_tail] = delta[set][way];
 
-      // Lookahead path follows the most confident entry
-      if (pf_conf > max_conf) {
-        lookahead_way = way;
-        max_conf = pf_conf;
-      }
-      pf_q_tail++;
+        // Lookahead path follows the most confident entry
+        if (pf_conf > max_conf) {
+          lookahead_way = way;
+          max_conf = pf_conf;
+        }
+        pf_q_tail++;
 
-      if constexpr (SPP_DEBUG_PRINT) {
-        if (pf_conf >= PF_THRESHOLD) {
+        if constexpr (SPP_DEBUG_PRINT) {
           std::cout << "[PT] " << __func__ << " HIGH CONF: " << pf_conf << " sig: " << std::hex << curr_sig << std::dec << " set: " << set << " way: " << way;
           std::cout << " delta: " << delta[set][way] << " c_delta: " << c_delta[set][way] << " c_sig: " << c_sig[set];
           std::cout << " conf: " << local_conf << " depth: " << depth << std::endl;
-        } else {
+        }
+      } else {
+        if constexpr (SPP_DEBUG_PRINT) {
           std::cout << "[PT] " << __func__ << "  LOW CONF: " << pf_conf << " sig: " << std::hex << curr_sig << std::dec << " set: " << set << " way: " << way;
           std::cout << " delta: " << delta[set][way] << " c_delta: " << c_delta[set][way] << " c_sig: " << c_sig[set];
           std::cout << " conf: " << local_conf << " depth: " << depth << std::endl;
         }
       }
     }
-    // Remove the extra pf_q_tail increment that was causing the crash
+    pf_q_tail++;
 
     lookahead_conf = max_conf;
     if (lookahead_conf >= PF_THRESHOLD)
@@ -553,8 +554,8 @@ void spp_tri::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
   }
 
   for (uint32_t i = 0; i < MAX_GHR_ENTRY; i++) {
-    // If GHR already holds the same pf_offset, update the GHR entry with the latest info
     if (valid[i] && (offset[i] == pf_offset)) {
+      // If GHR already holds the same pf_offset, update the GHR entry with the latest info
       sig[i] = pf_sig;
       confidence[i] = pf_confidence;
       delta[i] = pf_delta;

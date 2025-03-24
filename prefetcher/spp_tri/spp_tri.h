@@ -41,12 +41,14 @@ struct spp_tri : public champsim::modules::prefetcher {
   constexpr static std::size_t FILTER_SET = (1 << QUOTIENT_BIT);
   constexpr static uint32_t FILL_THRESHOLD = 90;
   constexpr static uint32_t PF_THRESHOLD = 25;
-  constexpr static uint32_t MIN_PF_THRESHOLD = 0; // Minimum threshold to issue any prefetch
 
   // Global register parameters
   constexpr static unsigned GLOBAL_COUNTER_BIT = 10;
   constexpr static uint32_t GLOBAL_COUNTER_MAX = ((1 << GLOBAL_COUNTER_BIT) - 1);
   constexpr static std::size_t MAX_GHR_ENTRY = 8;
+
+  // SPP-Tri: Counter for special DRAM prefetches
+  uint64_t special_dram_pf_issued;
 
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
@@ -56,6 +58,9 @@ struct spp_tri : public champsim::modules::prefetcher {
   void prefetcher_initialize();
   void prefetcher_cycle_operate();
   void prefetcher_final_stats();
+
+  // SPP-Tri: New method to issue low-confidence DRAM prefetches
+  void issue_dram_prefetches(uint32_t curr_sig, champsim::address base_addr, uint32_t metadata_in);
 
   enum FILTER_REQUEST { SPP_L2C_PREFETCH, SPP_LLC_PREFETCH, L2C_DEMAND, L2C_EVICT }; // Request type for prefetch filter
   static uint64_t get_hash(uint64_t key);
@@ -114,7 +119,7 @@ struct spp_tri : public champsim::modules::prefetcher {
     }
 
     void update_pattern(uint32_t last_sig, typename offset_type::difference_type curr_delta);
-    void read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& prefetch_delta, std::vector<uint32_t>& confidence_q,
+    void read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& delta_q, std::vector<uint32_t>& confidence_q,
                       uint32_t& lookahead_way, uint32_t& lookahead_conf, uint32_t& pf_q_tail, uint32_t& depth);
   };
 
@@ -137,12 +142,6 @@ struct spp_tri : public champsim::modules::prefetcher {
 
     bool check(champsim::address pf_addr, FILTER_REQUEST filter_request);
   };
-
-  // Statistics for different prefetch types
-  uint64_t stat_l2_prefetches = 0;
-  uint64_t stat_llc_prefetches = 0;
-  uint64_t stat_dram_prefetches = 0;
-  uint64_t stat_below_threshold = 0;
 
   class GLOBAL_REGISTER
   {
