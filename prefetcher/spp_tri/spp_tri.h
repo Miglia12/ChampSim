@@ -1,6 +1,7 @@
 #ifndef SPP_TRI_H
 #define SPP_TRI_H
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -16,6 +17,9 @@ struct spp_tri : public champsim::modules::prefetcher {
   constexpr static bool GHR_ON = true;
   constexpr static bool SPP_SANITY_CHECK = true;
   constexpr static bool SPP_DEBUG_PRINT = false;
+
+  // Confidence tracking feature
+  constexpr static bool CONFIDENCE_TRACKING = true;
 
   // Signature table parameters
   constexpr static std::size_t ST_SET = 1;
@@ -49,6 +53,11 @@ struct spp_tri : public champsim::modules::prefetcher {
 
   // SPP-Tri: Counter for special DRAM prefetches
   uint64_t special_dram_pf_issued;
+
+  // Confidence tracking arrays
+  constexpr static int MAX_CONFIDENCE = 100;
+  std::array<uint64_t, MAX_CONFIDENCE + 1> confidence_counters;
+  std::array<uint64_t, MAX_CONFIDENCE + 1> dram_confidence_counters;
 
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,

@@ -1,6 +1,8 @@
 #include "spp_tri.h"
 
+#include <algorithm>
 #include <cassert>
+#include <iomanip>
 #include <iostream>
 
 void spp_tri::prefetcher_initialize()
@@ -22,6 +24,12 @@ void spp_tri::prefetcher_initialize()
 
   // Initialize the SPP-Tri special DRAM prefetch counter
   special_dram_pf_issued = 0;
+
+  // Initialize confidence tracking if enabled
+  if constexpr (CONFIDENCE_TRACKING) {
+    confidence_counters.fill(0);
+    dram_confidence_counters.fill(0);
+  }
 
   // pass pointers
   ST._parent = this;
@@ -50,6 +58,13 @@ void spp_tri::issue_dram_prefetches(uint32_t curr_sig, champsim::address base_ad
         // Issue the DRAM prefetch - we don't check page boundaries here
         if (prefetch_line(pf_addr, false, metadata_in, true)) {
           special_dram_pf_issued++;
+
+          // Track confidence level if enabled
+          if constexpr (CONFIDENCE_TRACKING) {
+            // Make sure we don't exceed array bounds
+            uint32_t capped_conf = std::min(local_conf, static_cast<uint32_t>(MAX_CONFIDENCE));
+            dram_confidence_counters[capped_conf]++;
+          }
 
           if constexpr (SPP_DEBUG_PRINT) {
             std::cout << "[ChampSim] SPP-Tri DRAM prefetch issued: " << pf_addr;
@@ -115,6 +130,13 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
 
         if (champsim::page_number{pf_addr} == page) { // Prefetch request is in the same physical page
           if (FILTER.check(pf_addr, ((confidence_q[i] >= FILL_THRESHOLD) ? spp_tri::SPP_L2C_PREFETCH : spp_tri::SPP_LLC_PREFETCH))) {
+            // Track confidence level if enabled
+            if constexpr (CONFIDENCE_TRACKING) {
+              // Make sure we don't exceed array bounds
+              uint32_t capped_conf = std::min(confidence_q[i], static_cast<uint32_t>(MAX_CONFIDENCE));
+              confidence_counters[capped_conf]++;
+            }
+
             prefetch_line(pf_addr, (confidence_q[i] >= FILL_THRESHOLD), 0); // Use addr (not base_addr) to obey the same physical page boundary
 
             if (confidence_q[i] >= FILL_THRESHOLD) {
@@ -182,7 +204,43 @@ uint32_t spp_tri::prefetcher_cache_fill(champsim::address addr, long set, long w
   return metadata_in;
 }
 
-void spp_tri::prefetcher_final_stats() { std::cout << "SPP-Tri special DRAM prefetches issued: " << special_dram_pf_issued << std::endl; }
+void spp_tri::prefetcher_final_stats()
+{
+  std::cout << "SPP-Tri special DRAM prefetches issued: " << special_dram_pf_issued << std::endl;
+
+  // Print confidence statistics if tracking is enabled
+  if constexpr (CONFIDENCE_TRACKING) {
+    std::cout << "\nSPP-Tri Confidence Statistics:" << std::endl;
+    std::cout << "====================================" << std::endl;
+
+    // Regular prefetches
+    std::cout << "\nRegular Prefetches by Confidence Level:" << std::endl;
+    std::cout << "--------------------------------------" << std::endl;
+    uint64_t total_regular_pf = 0;
+    for (int i = PF_THRESHOLD; i <= MAX_CONFIDENCE; i++) {
+      if (confidence_counters[i] > 0) {
+        std::cout << "Confidence " << std::setw(3) << i << ": " << std::setw(10) << confidence_counters[i] << " prefetches" << std::endl;
+        total_regular_pf += confidence_counters[i];
+      }
+    }
+    std::cout << "Total regular prefetches: " << total_regular_pf << std::endl;
+
+    // DRAM prefetches
+    std::cout << "\nDRAM Prefetches by Confidence Level:" << std::endl;
+    std::cout << "-----------------------------------" << std::endl;
+    uint64_t total_dram_pf = 0;
+    for (int i = 1; i < PF_THRESHOLD; i++) {
+      if (dram_confidence_counters[i] > 0) {
+        std::cout << "Confidence " << std::setw(3) << i << ": " << std::setw(10) << dram_confidence_counters[i] << " DRAM prefetches" << std::endl;
+        total_dram_pf += dram_confidence_counters[i];
+      }
+    }
+    std::cout << "Total DRAM prefetches: " << total_dram_pf << std::endl;
+
+    // Print summary of all prefetches
+    std::cout << "\nTotal prefetches issued: " << (total_regular_pf + total_dram_pf) << std::endl;
+  }
+}
 
 // TODO: Find a good 64-bit hash function
 uint64_t spp_tri::get_hash(uint64_t key)
