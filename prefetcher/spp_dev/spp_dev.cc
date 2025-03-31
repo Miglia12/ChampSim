@@ -534,8 +534,8 @@ void spp::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confidence,
 
   // Assertion
   if (victim_way >= MAX_GHR_ENTRY) {
-    std::cout << "[GHR] Cannot find a replacement victim!" << std::endl;
-    assert(0);
+    victim_way = pf_sig % MAX_GHR_ENTRY;
+    std::cout << "[GHR] WARNING: Cannot find a replacement victim! Selecting random way: " << victim_way << std::endl;
   }
 
   if constexpr (spp::SPP_DEBUG_PRINT) {
