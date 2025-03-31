@@ -251,10 +251,22 @@ void spp_dev::SIGNATURE_TABLE::read_and_update_sig(champsim::address addr, uint3
         }
       }
 
-      // Assertion
       if (match == ST_WAY) {
-        std::cout << "[ST] Cannot find a replacement victim!" << std::endl;
-        assert(0);
+        // Instead of asserting, select a random victim based on the address
+        match = champsim::page_number{addr}.to<uint64_t>() % ST_WAY;
+
+        std::cout << "[ST] WARNING: Cannot find a replacement victim! Selecting random way: " << match << std::endl;
+
+        tag[set][match] = partial_page;
+        sig[set][match] = 0;
+        curr_sig = sig[set][match];
+        last_offset[set][match] = page_offset;
+
+        if constexpr (SPP_DEBUG_PRINT) {
+          std::cout << "[ST] " << __func__ << " random replacement set: " << set << " way: " << match;
+          std::cout << " valid: " << valid[set][match] << " victim tag: " << std::hex << tag[set][match] << " new tag: " << partial_page;
+          std::cout << " sig: " << sig[set][match] << " last_offset: " << std::dec << page_offset << std::endl;
+        }
       }
     }
   }
@@ -339,10 +351,16 @@ void spp_dev::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_t
     }
 
     if constexpr (SPP_SANITY_CHECK) {
-      // Assertion
       if (victim_way == PT_WAY) {
-        std::cout << "[PT] Cannot find a replacement victim!" << std::endl;
-        assert(0);
+        // Instead of asserting, choose a random way to replace
+        victim_way = get_hash(last_sig) % PT_WAY;
+
+        std::cout << "[PT] WARNING: Cannot find a replacement victim! Selecting random way: " << victim_way << std::endl;
+
+        if constexpr (SPP_DEBUG_PRINT) {
+          std::cout << "[PT] " << __func__ << " random replacement sig: " << std::hex << last_sig << std::dec << " set: " << set << " way: " << victim_way
+                    << std::endl;
+        }
       }
     }
   }
@@ -525,10 +543,15 @@ void spp_dev::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
     }
   }
 
-  // Assertion
   if (victim_way >= MAX_GHR_ENTRY) {
-    std::cout << "[GHR] Cannot find a replacement victim!" << std::endl;
-    assert(0);
+    // Instead of asserting, select a random victim
+    victim_way = pf_sig % MAX_GHR_ENTRY;
+
+    std::cout << "[GHR] WARNING: Cannot find a replacement victim! Selecting random way: " << victim_way << std::endl;
+
+    if constexpr (SPP_DEBUG_PRINT) {
+      std::cout << "[GHR] Random replacement index: " << victim_way << std::endl;
+    }
   }
 
   if constexpr (SPP_DEBUG_PRINT) {
