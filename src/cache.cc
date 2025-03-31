@@ -32,6 +32,8 @@
 #include "util/span.h"
 #include <fmt/core.h>
 
+CACHE* CACHE::llc_static = nullptr;
+
 CACHE::tag_lookup_type::tag_lookup_type(request_type req, bool local_pref, bool skip)
     : address(req.address), v_address(req.v_address), data(req.data), ip(req.ip), instr_id(req.instr_id), pf_metadata(req.pf_metadata), cpu(req.cpu),
       type(req.type), prefetch_from_this(local_pref), skip_fill(skip), is_translated(req.is_translated), instr_depend_on_me(req.instr_depend_on_me)
@@ -467,8 +469,12 @@ uint64_t CACHE::invalidate_entry(uint64_t inval_addr)
   return std::distance(begin, inv_way);
 }
 
-int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata)
+int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata, bool prefetch_at_llc)
 {
+  if (prefetch_at_llc && NAME != "LLC" && llc_static) {
+    return llc_static->prefetch_line(pf_addr, fill_this_level, prefetch_metadata, false);
+  }
+
   ++sim_stats.pf_requested;
 
   if (std::size(internal_PQ) >= PQ_SIZE)
@@ -674,6 +680,11 @@ void CACHE::initialize()
 {
   impl_prefetcher_initialize();
   impl_initialize_replacement();
+
+  if (NAME == "LLC") {
+    fmt::print("[{}] Setting LLC static pointer to {}\n", NAME, static_cast<void*>(this));
+    llc_static = this;
+  }
 }
 
 void CACHE::begin_phase()

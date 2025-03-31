@@ -207,11 +207,13 @@ public:
   std::vector<std::size_t> get_pq_size() const;
   std::vector<double> get_pq_occupancy_ratio() const;
 
+  static CACHE* llc_static;
+
   [[deprecated("Use get_set_index() instead.")]] uint64_t get_set(uint64_t address) const;
   [[deprecated("This function should not be used to access the blocks directly.")]] uint64_t get_way(uint64_t address, uint64_t set) const;
 
   uint64_t invalidate_entry(uint64_t inval_addr);
-  int prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
+  int prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata, bool prefetch_at_llc = false);
 
   [[deprecated("Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] int
   prefetch_line(uint64_t ip, uint64_t base_addr, uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
