@@ -19,7 +19,7 @@ struct spp_tri : public champsim::modules::prefetcher {
   constexpr static bool SPP_DEBUG_PRINT = false;
 
   // Confidence tracking feature
-  constexpr static bool CONFIDENCE_TRACKING = true;
+  constexpr static bool CONFIDENCE_TRACKING = false;
 
   // Signature table parameters
   constexpr static std::size_t ST_SET = 1;
