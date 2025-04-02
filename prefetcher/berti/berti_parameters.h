@@ -107,5 +107,11 @@ namespace berti_space
   # define BERTI_L1                     (0x1)
   # define BERTI_L2                     (0x2)
   # define BERTI_L2R                    (0x3)
+  
+  /*****************************************************************************
+   *                       DRAM WARMING PARAMETERS                             *
+   *****************************************************************************/
+  # define DRAM_WARMING_ENABLED        (true)   // Toggle DRAM warming feature on/off
+  # define DRAM_WARMING_THRESHOLD      (3)      // Min confidence for DRAM warming
 };
 # endif

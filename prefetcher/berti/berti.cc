@@ -1026,13 +1026,14 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
   berti->get(ip_hash, deltas);
 
   bool first_issue = true;
+  // Original prefetching logic for high-confidence deltas
   for (auto i: deltas)
   {
     uint64_t p_addr = (line_addr + i.delta) << LOG2_BLOCK_SIZE;
     uint64_t p_b_addr = (p_addr >> LOG2_BLOCK_SIZE);
 
     if (latencyt->get(p_b_addr)) continue;
-    if (i.rpl == BERTI_R) return metadata_in;
+    if (i.rpl == BERTI_R) break; // Don't return yet - we'll try DRAM warming after this loop
     if (p_addr == 0) continue;
 
     if ((p_addr >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
@@ -1074,6 +1075,40 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
         {
           latencyt->add(p_b_addr, ip_hash, true, current_cycle);
         }
+      }
+    }
+  }
+
+  // New DRAM warming logic for low-confidence deltas
+  if (DRAM_WARMING_ENABLED && llc_static)
+  {
+    for (auto i: deltas)
+    {
+      // Only consider deltas that would be ignored by main Berti (BERTI_R)
+      // but have sufficient confidence for DRAM warming
+      if (i.rpl != BERTI_R || i.conf < DRAM_WARMING_THRESHOLD || i.delta == 0) 
+        continue;
+      
+      uint64_t p_addr = (line_addr + i.delta) << LOG2_BLOCK_SIZE;
+      uint64_t p_b_addr = (p_addr >> LOG2_BLOCK_SIZE);
+      
+      // Skip if already being tracked or if address is invalid
+      if (latencyt->get(p_b_addr) || p_addr == 0) 
+        continue;
+      
+      // Note: We ignore cross-page check for DRAM warming as requested
+      
+      if constexpr (champsim::debug_print)
+      {
+        std::cout << "[BERTI] DRAM warming prefetch delta: " << i.delta;
+        std::cout << " p_addr: " << std::hex << p_addr << std::dec;
+        std::cout << " confidence: " << i.conf << std::endl;
+      }
+      
+      // Issue DRAM warming prefetch to LLC with fill_this_level=false
+      if (llc_static->prefetch_line(p_addr, false, metadata_in, true))
+      {
+        dram_warming_issued++;
       }
     }
   }
@@ -1155,5 +1190,13 @@ void CACHE::prefetcher_final_stats()
 
   std::cout << "BERTI";
   std::cout << " AVERAGE_ISSUED: " << ((1.0*average_issued)/average_num);
+  std::cout << std::endl;
+  
+  // Report DRAM warming stats
+  std::cout << "BERTI DRAM_WARMING_ISSUED: " << dram_warming_issued;
+  if (DRAM_WARMING_ENABLED) 
+    std::cout << " (enabled, threshold=" << DRAM_WARMING_THRESHOLD << ")";
+  else
+    std::cout << " (disabled)";
   std::cout << std::endl;
 }

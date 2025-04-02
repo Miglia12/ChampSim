@@ -77,6 +77,7 @@ namespace berti_space
   uint64_t found_berti = 0;
   uint64_t average_issued = 0;
   uint64_t average_num = 0;
+  uint64_t dram_warming_issued = 0; // Counter for DRAM warming prefetches
   
   /*****************************************************************************
    *                      General Structs                                      *
