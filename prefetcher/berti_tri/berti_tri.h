@@ -1,5 +1,5 @@
-#ifndef VBERTI_H_
-#define VBERTI_H_
+#ifndef VBERTI_TRI_H_
+#define VBERTI_TRI_H_
 
 /*
  * Berti: an Accurate Local-Delta Data Prefetcher
@@ -37,7 +37,7 @@
  * pages={975-991},  doi={10.1109/MICRO56248.2022.00072}}
  */
 
-#include "berti_parameters.h"
+#include "berti_tri_parameters.h"
 #include "cache.h"
 
 #include <algorithm>
@@ -77,6 +77,7 @@ namespace berti_space
   uint64_t found_berti = 0;
   uint64_t average_issued = 0;
   uint64_t average_num = 0;
+  uint64_t dram_warming_issued = 0; // Counter for DRAM warming prefetches
   
   /*****************************************************************************
    *                      General Structs                                      *
