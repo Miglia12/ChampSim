@@ -752,7 +752,7 @@ uint8_t Berti::get_dram_prefetch_candidates(uint64_t tag, std::vector<delta_t>& 
     }
   }
 
-#if DRAM_WARMING_SORT
+#if DRAM_PREFETCH_SORT
   // Sort the entries by confidence (higher first), then by delta size
   if (!res.empty()) {
     std::sort(std::begin(res), std::end(res), [](const delta_t& a, const delta_t& b) {
@@ -1137,7 +1137,7 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
     // Get only the low confidence deltas suitable for DRAM warming
     std::vector<delta_t> warming_deltas;
     if (berti->get_dram_prefetch_candidates(ip_hash, warming_deltas, DRAM_PREFETCH_THRESHOLD)) {
-      uint64_t warming_issued = 0;
+      uint64_t current_dram_prefetch_issued = 0;
 
       // Process each delta
       for (auto& i : warming_deltas) {
@@ -1155,8 +1155,8 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
             std::cout << " confidence: " << i.conf;
             std::cout << " address: " << std::hex << p_addr << std::dec << std::endl;
           }
-          dram_warming_issued++;
-          warming_issued++;
+          dram_prefetch_issued++;
+          current_dram_prefetch_issued++;
         }
       }
     }
@@ -1240,12 +1240,18 @@ void CACHE::prefetcher_final_stats()
   std::cout << "BERTI_TRI";
   std::cout << " AVERAGE_ISSUED: " << ((1.0*average_issued)/average_num);
   std::cout << std::endl;
-  
+
   // Report DRAM warming stats
-  std::cout << "BERTI_TRI DRAM_WARMING_ISSUED: " << dram_warming_issued;
-  if (DRAM_PREFETCH_ENABLED)
-    std::cout << " (enabled, threshold=" << DRAM_PREFETCH_THRESHOLD << ")";
-  else
-    std::cout << " (disabled)";
+  std::cout << "BERTI_TRI DRAM_PREFETCH_ISSUED: " << dram_prefetch_issued;
+#if DRAM_PREFETCH_ENABLED
+  std::cout << " (enabled, threshold=" << DRAM_PREFETCH_THRESHOLD << ")";
+#else
+  std::cout << " (disabled)";
+#endif
+
+#ifdef DRAM_PREFETCH_SORT
+  std::cout << " | ordering enabled";
+#endif
+
   std::cout << std::endl;
 }
