@@ -79,13 +79,6 @@ namespace berti_space
   uint64_t average_num = 0;
   uint64_t dram_warming_issued = 0; // Counter for DRAM warming prefetches
   
-  // Confidence tracking statistics
-  uint64_t delta_conf_stats[CONFIDENCE_MAX+1] = {0}; // Track frequency of each confidence value
-  uint64_t delta_transitions[4] = {0}; // Track how many times deltas change levels
-  uint64_t zero_delta_counts = 0; // Count deltas with value 0
-  uint64_t nonzero_delta_low_conf = 0; // Count non-zero deltas with BERTI_R level
-  uint64_t delta_by_rpl[4] = {0}; // Count deltas by replacement level
-  
   /*****************************************************************************
    *                      General Structs                                      *
    *****************************************************************************/

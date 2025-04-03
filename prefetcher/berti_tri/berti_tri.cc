@@ -537,22 +537,11 @@ void Berti::increase_conf_tag(uint64_t tag)
       // Track previous replacement level before setting new one
       uint8_t prev_rpl = i.rpl;
       
-      // Record confidence values
-      if (i.delta != 0) {
-        // Update confidence stats before resetting
-        delta_conf_stats[i.conf]++;
-      }
-      
       // Set bits to prefetch level
       if (i.conf > CONFIDENCE_L1)i.rpl = BERTI_L1;
       else if (i.conf > CONFIDENCE_L2) i.rpl = BERTI_L2;
       else if (i.conf > CONFIDENCE_L2R) i.rpl = BERTI_L2R;
       else i.rpl = BERTI_R;
-
-      // Track transitions between different replacement levels
-      if (prev_rpl != i.rpl && i.delta != 0) {
-        delta_transitions[i.rpl]++;
-      }
 
       if constexpr (champsim::debug_print) 
       {
@@ -712,18 +701,6 @@ uint8_t Berti::get(uint64_t tag, std::vector<delta_t> &res)
 
   // We found the tag
   berti *entry = bertit[tag];
-
-  // Copy all deltas for stats tracking (before filtering)
-  for (auto &i: entry->deltas) {
-    if (i.delta == 0) {
-      // Track zero deltas separately
-      if (i.conf > 0) { // Only count initialized entries
-        zero_delta_counts++;
-        // Track confidence of zero deltas
-        delta_conf_stats[i.conf]++;
-      }
-    }
-  }
   
   // Add non-zero deltas with high confidence to the result vector
   for (auto &i: entry->deltas) {
@@ -1077,19 +1054,6 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
 
   bool first_issue = true;
 
-  // Count deltas by replacement level before prefetching
-  for (auto i: deltas)
-  {
-    if (i.delta == 0) {
-      zero_delta_counts++;
-    } else {
-      delta_by_rpl[i.rpl]++;
-      if (i.rpl == BERTI_R) {
-        nonzero_delta_low_conf++;
-      }
-    }
-  }
-
   // Original prefetching logic
   for (auto i: deltas)
   {
@@ -1259,24 +1223,4 @@ void CACHE::prefetcher_final_stats()
   else
     std::cout << " (disabled)";
   std::cout << std::endl;
-  
-  // Report delta tracking statistics
-  std::cout << "BERTI_TRI DELTA STATS:" << std::endl;
-  std::cout << "  Zero deltas count: " << zero_delta_counts << std::endl;
-  std::cout << "  Non-zero deltas with low conf (BERTI_R): " << nonzero_delta_low_conf << std::endl;
-  
-  // Count deltas by replacement level
-  std::cout << "  Deltas by replacement level:" << std::endl;
-  std::cout << "    BERTI_R (rejected): " << delta_by_rpl[BERTI_R] << std::endl;
-  std::cout << "    BERTI_L1 (high conf): " << delta_by_rpl[BERTI_L1] << std::endl;
-  std::cout << "    BERTI_L2 (medium conf): " << delta_by_rpl[BERTI_L2] << std::endl;
-  std::cout << "    BERTI_L2R (low conf): " << delta_by_rpl[BERTI_L2R] << std::endl;
-  
-  // Report confidence distribution
-  std::cout << "  Confidence distribution:" << std::endl;
-  for (int i = 0; i <= CONFIDENCE_MAX; i++) {
-    if (delta_conf_stats[i] > 0) {
-      std::cout << "    Conf " << i << ": " << delta_conf_stats[i] << std::endl;
-    }
-  }
 }
