@@ -226,7 +226,7 @@ namespace berti_space
       void find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, 
           uint64_t line_addr);
       uint8_t get(uint64_t tag, std::vector<delta_t> &res);
-      uint8_t get_warming_candidates(uint64_t tag, std::vector<delta_t>& res, uint8_t confidence_threshold = 0);
+      uint8_t get_dram_prefetch_candidates(uint64_t tag, std::vector<delta_t>& res, uint8_t confidence_threshold = 0);
       uint64_t ip_hash(uint64_t ip);
   };
   

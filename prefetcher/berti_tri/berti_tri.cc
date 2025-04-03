@@ -731,7 +731,8 @@ uint8_t Berti::get(uint64_t tag, std::vector<delta_t> &res)
   return 1;
 }
 
-uint8_t Berti::get_warming_candidates(uint64_t tag, std::vector<delta_t>& res, uint8_t confidence_threshold) {
+uint8_t Berti::get_dram_prefetch_candidates(uint64_t tag, std::vector<delta_t>& res, uint8_t confidence_threshold)
+{
   if (!bertit.count(tag)) {
     if constexpr (champsim::debug_print)
       std::cout << " TAG NOT FOUND" << std::endl;
@@ -750,6 +751,21 @@ uint8_t Berti::get_warming_candidates(uint64_t tag, std::vector<delta_t>& res, u
       res.push_back(i);
     }
   }
+
+#if DRAM_WARMING_SORT
+  // Sort the entries by confidence (higher first), then by delta size
+  if (!res.empty()) {
+    std::sort(std::begin(res), std::end(res), [](const delta_t& a, const delta_t& b) {
+      if (a.conf > b.conf)
+        return true; // Higher confidence first
+      if (a.conf < b.conf)
+        return false;
+
+      // If confidence is equal, prefer smaller deltas
+      return std::abs(a.delta) < std::abs(b.delta);
+    });
+  }
+#endif
 
   return 1;
 }
@@ -993,7 +1009,16 @@ void CACHE::prefetcher_initialize()
   std::cout << "BERTI HASH FOLD" << std::endl;
 #endif
   std::cout << "BERTI IP MASK " << std::hex << IP_MASK << std::dec << std::endl;
- 
+
+#if DRAM_PREFETCH_ENABLED
+  std::cout << "DRAM prefetching enabled, threshold=" << DRAM_PREFETCH_THRESHOLD;
+#if DRAM_PREFETCH_SORT
+  std::cout << ", sorted by confidence";
+#else
+  std::cout << ", unsorted";
+#endif
+  std::cout << std::endl;
+#endif
 }
 
 void CACHE::prefetcher_cycle_operate()
@@ -1108,10 +1133,10 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
   }
 
   // New DRAM warming logic for low-confidence deltas
-  if (DRAM_WARMING_ENABLED && llc_static) {
+  if (DRAM_PREFETCH_ENABLED && llc_static) {
     // Get only the low confidence deltas suitable for DRAM warming
     std::vector<delta_t> warming_deltas;
-    if (berti->get_warming_candidates(ip_hash, warming_deltas, DRAM_WARMING_THRESHOLD)) {
+    if (berti->get_dram_prefetch_candidates(ip_hash, warming_deltas, DRAM_PREFETCH_THRESHOLD)) {
       uint64_t warming_issued = 0;
 
       // Process each delta
@@ -1218,8 +1243,8 @@ void CACHE::prefetcher_final_stats()
   
   // Report DRAM warming stats
   std::cout << "BERTI_TRI DRAM_WARMING_ISSUED: " << dram_warming_issued;
-  if (DRAM_WARMING_ENABLED) 
-    std::cout << " (enabled, threshold=" << DRAM_WARMING_THRESHOLD << ")";
+  if (DRAM_PREFETCH_ENABLED)
+    std::cout << " (enabled, threshold=" << DRAM_PREFETCH_THRESHOLD << ")";
   else
     std::cout << " (disabled)";
   std::cout << std::endl;
