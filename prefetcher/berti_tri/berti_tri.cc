@@ -524,24 +524,35 @@ void Berti::increase_conf_tag(uint64_t tag)
   }
 
   // Get the entries and the deltas
-
   bertit[tag]->conf += CONFIDENCE_INC;
 
   if constexpr (champsim::debug_print) 
     std::cout << " global_conf: " << bertit[tag]->conf;
 
-
   if (bertit[tag]->conf == CONFIDENCE_MAX) 
   {
-
-    // Max confidence achieve
+    // Max confidence achieve - track and update delta confidence levels
     for (auto &i: bertit[tag]->deltas)
     {
+      // Track previous replacement level before setting new one
+      uint8_t prev_rpl = i.rpl;
+      
+      // Record confidence values
+      if (i.delta != 0) {
+        // Update confidence stats before resetting
+        delta_conf_stats[i.conf]++;
+      }
+      
       // Set bits to prefetch level
       if (i.conf > CONFIDENCE_L1)i.rpl = BERTI_L1;
       else if (i.conf > CONFIDENCE_L2) i.rpl = BERTI_L2;
       else if (i.conf > CONFIDENCE_L2R) i.rpl = BERTI_L2R;
       else i.rpl = BERTI_R;
+
+      // Track transitions between different replacement levels
+      if (prev_rpl != i.rpl && i.delta != 0) {
+        delta_transitions[i.rpl]++;
+      }
 
       if constexpr (champsim::debug_print) 
       {
@@ -700,9 +711,26 @@ uint8_t Berti::get(uint64_t tag, std::vector<delta_t> &res)
   if constexpr (champsim::debug_print) std::cout << std::endl;
 
   // We found the tag
-  berti *entry  = bertit[tag];
+  berti *entry = bertit[tag];
 
-  for (auto &i: entry->deltas) if (i.delta != 0 && i.rpl != BERTI_R) res.push_back(i);
+  // Copy all deltas for stats tracking (before filtering)
+  for (auto &i: entry->deltas) {
+    if (i.delta == 0) {
+      // Track zero deltas separately
+      if (i.conf > 0) { // Only count initialized entries
+        zero_delta_counts++;
+        // Track confidence of zero deltas
+        delta_conf_stats[i.conf]++;
+      }
+    }
+  }
+  
+  // Add non-zero deltas with high confidence to the result vector
+  for (auto &i: entry->deltas) {
+    if (i.delta != 0 && i.rpl != BERTI_R) {
+      res.push_back(i);
+    }
+  }
 
   if (res.empty() && entry->conf >= LAUNCH_MIDDLE_CONF)
   {
@@ -726,8 +754,30 @@ uint8_t Berti::get(uint64_t tag, std::vector<delta_t> &res)
   return 1;
 }
 
-void Berti::find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, 
-    uint64_t line_addr)
+uint8_t Berti::get_warming_candidates(uint64_t tag, std::vector<delta_t>& res, uint8_t confidence_threshold) {
+  if (!bertit.count(tag)) {
+    if constexpr (champsim::debug_print)
+      std::cout << " TAG NOT FOUND" << std::endl;
+    return 0;
+  }
+
+  if constexpr (champsim::debug_print)
+    std::cout << std::endl;
+
+  // We found the tag
+  berti* entry = bertit[tag];
+
+  // Add only BERTI_R deltas with confidence >= threshold
+  for (auto& i : entry->deltas) {
+    if (i.delta != 0 && i.rpl == BERTI_R && i.conf >= confidence_threshold) {
+      res.push_back(i);
+    }
+  }
+
+  return 1;
+}
+
+void Berti::find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, uint64_t line_addr)
 { 
   // We were tracking this miss
   uint64_t tags[HISTORY_TABLE_WAYS];
@@ -1026,7 +1076,21 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
   berti->get(ip_hash, deltas);
 
   bool first_issue = true;
-  // Original prefetching logic for high-confidence deltas
+
+  // Count deltas by replacement level before prefetching
+  for (auto i: deltas)
+  {
+    if (i.delta == 0) {
+      zero_delta_counts++;
+    } else {
+      delta_by_rpl[i.rpl]++;
+      if (i.rpl == BERTI_R) {
+        nonzero_delta_low_conf++;
+      }
+    }
+  }
+
+  // Original prefetching logic
   for (auto i: deltas)
   {
     uint64_t p_addr = (line_addr + i.delta) << LOG2_BLOCK_SIZE;
@@ -1080,35 +1144,31 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
   }
 
   // New DRAM warming logic for low-confidence deltas
-  if (DRAM_WARMING_ENABLED && llc_static)
-  {
-    for (auto i: deltas)
-    {
-      // Only consider deltas that would be ignored by main Berti (BERTI_R)
-      // but have sufficient confidence for DRAM warming
-      if (i.rpl != BERTI_R || i.conf < DRAM_WARMING_THRESHOLD || i.delta == 0) 
-        continue;
-      
-      uint64_t p_addr = (line_addr + i.delta) << LOG2_BLOCK_SIZE;
-      uint64_t p_b_addr = (p_addr >> LOG2_BLOCK_SIZE);
-      
-      // Skip if already being tracked or if address is invalid
-      if (latencyt->get(p_b_addr) || p_addr == 0) 
-        continue;
-      
-      // Note: We ignore cross-page check for DRAM warming as requested
-      
-      if constexpr (champsim::debug_print)
-      {
-        std::cout << "[BERTI] DRAM warming prefetch delta: " << i.delta;
-        std::cout << " p_addr: " << std::hex << p_addr << std::dec;
-        std::cout << " confidence: " << i.conf << std::endl;
-      }
-      
-      // Issue DRAM warming prefetch to LLC with fill_this_level=false
-      if (llc_static->prefetch_line(p_addr, false, metadata_in, true))
-      {
-        dram_warming_issued++;
+  if (DRAM_WARMING_ENABLED && llc_static) {
+    // Get only the low confidence deltas suitable for DRAM warming
+    std::vector<delta_t> warming_deltas;
+    if (berti->get_warming_candidates(ip_hash, warming_deltas, DRAM_WARMING_THRESHOLD)) {
+      uint64_t warming_issued = 0;
+
+      // Process each delta
+      for (auto& i : warming_deltas) {
+        uint64_t p_addr = (line_addr + i.delta) << LOG2_BLOCK_SIZE;
+        uint64_t p_b_addr = (p_addr >> LOG2_BLOCK_SIZE);
+
+        // Skip if already being tracked or if address is invalid
+        if (latencyt->get(p_b_addr) || p_addr == 0)
+          continue;
+
+        // Issue DRAM warming prefetch to LLC with fill_this_level=false
+        if (prefetch_line(p_addr, false, metadata_in, true)) {
+          if constexpr (champsim::debug_print) {
+            std::cout << "[BERTI] DRAM warming prefetch delta: " << i.delta;
+            std::cout << " confidence: " << i.conf;
+            std::cout << " address: " << std::hex << p_addr << std::dec << std::endl;
+          }
+          dram_warming_issued++;
+          warming_issued++;
+        }
       }
     }
   }
@@ -1199,4 +1259,24 @@ void CACHE::prefetcher_final_stats()
   else
     std::cout << " (disabled)";
   std::cout << std::endl;
+  
+  // Report delta tracking statistics
+  std::cout << "BERTI_TRI DELTA STATS:" << std::endl;
+  std::cout << "  Zero deltas count: " << zero_delta_counts << std::endl;
+  std::cout << "  Non-zero deltas with low conf (BERTI_R): " << nonzero_delta_low_conf << std::endl;
+  
+  // Count deltas by replacement level
+  std::cout << "  Deltas by replacement level:" << std::endl;
+  std::cout << "    BERTI_R (rejected): " << delta_by_rpl[BERTI_R] << std::endl;
+  std::cout << "    BERTI_L1 (high conf): " << delta_by_rpl[BERTI_L1] << std::endl;
+  std::cout << "    BERTI_L2 (medium conf): " << delta_by_rpl[BERTI_L2] << std::endl;
+  std::cout << "    BERTI_L2R (low conf): " << delta_by_rpl[BERTI_L2R] << std::endl;
+  
+  // Report confidence distribution
+  std::cout << "  Confidence distribution:" << std::endl;
+  for (int i = 0; i <= CONFIDENCE_MAX; i++) {
+    if (delta_conf_stats[i] > 0) {
+      std::cout << "    Conf " << i << ": " << delta_conf_stats[i] << std::endl;
+    }
+  }
 }
