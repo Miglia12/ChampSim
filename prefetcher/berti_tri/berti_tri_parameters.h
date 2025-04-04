@@ -112,7 +112,14 @@ namespace berti_space
  *                       DRAM PREFETCH PARAMETERS                            *
  *****************************************************************************/
 #define DRAM_PREFETCH_ENABLED (true) // Toggle DRAM prefetch feature on/off
-#define DRAM_PREFETCH_THRESHOLD (2)  // Min confidence for DRAM prefetch
+#define DRAM_PREFETCH_THRESHOLD (4)  // Min confidence for DRAM prefetch
 #define DRAM_PREFETCH_SORT (true)    // Sort DRAM prefetch candidates by confidence
+#define LOW_CONF_BUFFER_SIZE (32)    // Maximum size of low confidence prefetch buffer
+#define LOW_CONF_MIN_DELAY (40)      // Minimum delay in cycles (at least LLC delay)
+#define LOW_CONF_MAX_DELAY (100)     // Maximum delay in cycles (all caches delays + DRAM)
+#define LOW_CONF_PENALTY_PER_CYCLE (0)      // Penalty per cycle for priority calculation
+#define LOW_CONF_LATE_SLACK (10)            // How many cycles past ready_cycle a prefetch can still be issued
+#define LOW_CONF_BANDWIDTH_THRESHOLD (85.0) // LLC queue occupancy threshold (%) to throttle prefetches
+#define LOW_CONF_AVG_DELAY_FACTOR (0.5)          // Factor to calculate average delay for low-confidence prefetches (avg_delay * factor)
 }; // namespace berti_space
 #endif

@@ -38,6 +38,210 @@
  */
 
 using namespace berti_space;
+
+/******************************************************************************/
+/*                      Dram Prefetch functions                               */
+/******************************************************************************/
+uint64_t Berti::calculate_safe_delay(uint64_t current_cycle)
+{
+  // Calculate the minimum safe delay that ensures all regular prefetches
+  // at the current cycle will reach DRAM before any low confidence prefetches
+
+  // We need to estimate the worst-case traversal time through the cache hierarchy
+  // For simplicity, we use the average latency as a baseline, plus a safety margin
+
+  // If average latency is not yet established, use the constant
+  uint64_t base_delay;
+  if (average_latency.num < 10) {
+    base_delay = LOW_CONF_MIN_DELAY;
+  } else {
+    base_delay = static_cast<uint64_t>(average_latency.average * LOW_CONF_AVG_DELAY_FACTOR);
+  }
+
+  // Enforce min/max bounds
+  uint64_t safe_delay = std::max(static_cast<uint64_t>(LOW_CONF_MIN_DELAY), std::min(static_cast<uint64_t>(LOW_CONF_MAX_DELAY), safe_delay));
+
+  if constexpr (champsim::debug_print) {
+    std::cout << "[BERTI] calculate_safe_delay: base=" << base_delay << " with_margin=" << safe_delay << " avg_latency=" << average_latency.average
+              << " samples=" << average_latency.num << std::endl;
+  }
+
+  return safe_delay;
+}
+
+void Berti::add_to_low_confidence_buffer(uint64_t addr, uint32_t metadata, uint64_t current_cycle, uint64_t confidence)
+{
+  // Calculate delay
+  uint64_t delay = calculate_safe_delay(current_cycle);
+
+  delayed_prefetch new_pf = {addr, metadata,
+                             current_cycle + delay,
+                             confidence, current_cycle};
+
+  // Check for duplicates
+  auto duplicate = std::find_if(low_confidence_buffer.begin(), low_confidence_buffer.end(),
+                                [addr](const delayed_prefetch& pf) { return (pf.addr >> LOG2_BLOCK_SIZE) == (addr >> LOG2_BLOCK_SIZE); });
+
+  if (duplicate != low_confidence_buffer.end()) {
+    // If already queued, keep the higher confidence version
+    if (confidence > duplicate->confidence) {
+      duplicate->confidence = confidence;
+      // Don't update timing
+    }
+    return;
+  }
+
+  if (low_confidence_buffer.size() >= LOW_CONF_BUFFER_SIZE) {
+    // Find lowest priority prefetch
+    auto lowest_priority =
+        std::min_element(low_confidence_buffer.begin(), low_confidence_buffer.end(), [current_cycle](const delayed_prefetch& a, const delayed_prefetch& b) {
+          double priority_a = a.confidence - ((a.ready_cycle > current_cycle) ? (a.ready_cycle - current_cycle) * LOW_CONF_PENALTY_PER_CYCLE : 0);
+
+          double priority_b = b.confidence - ((b.ready_cycle > current_cycle) ? (b.ready_cycle - current_cycle) * LOW_CONF_PENALTY_PER_CYCLE : 0);
+
+          return priority_a < priority_b; // Lower priority = candidate for replacement
+        });
+
+    
+    double new_priority = confidence - ((new_pf.ready_cycle > current_cycle) ? (new_pf.ready_cycle - current_cycle) * LOW_CONF_PENALTY_PER_CYCLE : 0);
+
+    // Calculate lowest existing priority
+    double lowest_priority_value =
+        lowest_priority->confidence
+        - ((lowest_priority->ready_cycle > current_cycle) ? (lowest_priority->ready_cycle - current_cycle) * LOW_CONF_PENALTY_PER_CYCLE : 0);
+
+    // Replace only if new prefetch has higher priority
+    if (new_priority > lowest_priority_value) {
+      *lowest_priority = new_pf;
+    }
+  } else {
+    // Buffer not full
+    low_confidence_buffer.push_back(new_pf);
+  }
+
+  if constexpr (champsim::debug_print) {
+    std::cout << "[BERTI] buffered low-confidence prefetch: " << std::hex << addr << std::dec << " confidence: " << confidence << " delay: " << delay
+              << " ready at: " << new_pf.ready_cycle << " (current: " << current_cycle << ")" << std::endl;
+  }
+}
+
+void Berti::issue_delayed_prefetches(uint64_t current_cycle, CACHE* cache_ptr)
+{
+  if (!CACHE::llc_static)
+    return;
+
+  // First, remove late prefetches that have missed their timing window
+  auto stale_end = std::remove_if(low_confidence_buffer.begin(), low_confidence_buffer.end(), [current_cycle](const delayed_prefetch& pf) {
+    // Remove if it's beyond ready_cycle + slack
+    return current_cycle > (pf.ready_cycle + LOW_CONF_LATE_SLACK);
+  });
+
+  size_t late_count = std::distance(stale_end, low_confidence_buffer.end());
+  if (late_count > 0) {
+    late_removed += late_count;
+
+    if constexpr (champsim::debug_print) {
+      std::cout << "[BERTI] removed " << late_count << " late prefetches (beyond timing window) from buffer" << std::endl;
+    }
+    low_confidence_buffer.erase(stale_end, low_confidence_buffer.end());
+  }
+
+  // Check if LLC queues are too full to issue more prefetches
+  bool bandwidth_available = true;
+  if (CACHE::llc_static) {
+    // Check LLC queue occupancy
+    double pq_occupancy = 0.0;
+    auto pq_sizes = CACHE::llc_static->get_pq_size();
+    auto pq_occup = CACHE::llc_static->get_pq_occupancy();
+
+    for (size_t i = 0; i < pq_sizes.size(); i++) {
+      if (pq_sizes[i] > 0) {
+        pq_occupancy = std::max(pq_occupancy, static_cast<double>(pq_occup[i]) / pq_sizes[i] * 100.0);
+      }
+    }
+
+    bandwidth_available = (pq_occupancy < LOW_CONF_BANDWIDTH_THRESHOLD);
+
+    if (!bandwidth_available) {
+      throttled_prefetches++;
+
+      if constexpr (champsim::debug_print) {
+        std::cout << "[BERTI] throttling low-confidence prefetches due to high LLC PQ occupancy: " << pq_occupancy << "%" << std::endl;
+      }
+    }
+  }
+
+  // If bandwidth is available, find prefetches ready to issue
+  if (bandwidth_available) {
+    std::vector<size_t> to_issue;
+
+    for (size_t i = 0; i < low_confidence_buffer.size(); i++) {
+      if (low_confidence_buffer[i].ready_cycle <= current_cycle) {
+        to_issue.push_back(i);
+      }
+    }
+
+    // Issue ready prefetches
+    for (auto idx = to_issue.rbegin(); idx != to_issue.rend(); ++idx) {
+      const auto& pf = low_confidence_buffer[*idx];
+
+      if constexpr (champsim::debug_print) {
+        std::cout << "[BERTI] issuing delayed prefetch: " << std::hex << pf.addr << std::dec << " confidence: " << pf.confidence
+                  << " ready cycle: " << pf.ready_cycle << " delay: " << (pf.ready_cycle - pf.creation_cycle) << " (current: " << current_cycle << ")"
+                  << std::endl;
+      }
+
+      // Issue to LLC
+      if(CACHE::llc_static->prefetch_line(pf.addr, false, pf.metadata, false))
+        dram_prefetch_issued++;
+    }
+
+    // Remove issued prefetches
+    for (auto idx = to_issue.rbegin(); idx != to_issue.rend(); ++idx) {
+      low_confidence_buffer.erase(low_confidence_buffer.begin() + *idx);
+    }
+  }
+}
+
+uint8_t Berti::get_dram_prefetch_candidates(uint64_t tag, std::vector<delta_t>& res, uint8_t confidence_threshold)
+{
+  if (!bertit.count(tag)) {
+    if constexpr (champsim::debug_print)
+      std::cout << " TAG NOT FOUND" << std::endl;
+    return 0;
+  }
+
+  if constexpr (champsim::debug_print)
+    std::cout << std::endl;
+
+  // We found the tag
+  berti* entry = bertit[tag];
+
+  // Add only BERTI_R deltas with confidence >= threshold
+  for (auto& i : entry->deltas) {
+    if (i.delta != 0 && i.rpl == BERTI_R && i.conf >= confidence_threshold) {
+      res.push_back(i);
+    }
+  }
+
+#if DRAM_PREFETCH_SORT
+  // Sort the entries by confidence (higher first), then by delta size
+  if (!res.empty()) {
+    std::sort(std::begin(res), std::end(res), [](const delta_t& a, const delta_t& b) {
+      if (a.conf > b.conf)
+        return true; // Higher confidence first
+      if (a.conf < b.conf)
+        return false;
+
+      // If confidence is equal, prefer smaller deltas
+      return std::abs(a.delta) < std::abs(b.delta);
+    });
+  }
+#endif
+
+  return 1;
+}
+
 /******************************************************************************/
 /*                      Latency table functions                               */
 /******************************************************************************/
@@ -731,45 +935,6 @@ uint8_t Berti::get(uint64_t tag, std::vector<delta_t> &res)
   return 1;
 }
 
-uint8_t Berti::get_dram_prefetch_candidates(uint64_t tag, std::vector<delta_t>& res, uint8_t confidence_threshold)
-{
-  if (!bertit.count(tag)) {
-    if constexpr (champsim::debug_print)
-      std::cout << " TAG NOT FOUND" << std::endl;
-    return 0;
-  }
-
-  if constexpr (champsim::debug_print)
-    std::cout << std::endl;
-
-  // We found the tag
-  berti* entry = bertit[tag];
-
-  // Add only BERTI_R deltas with confidence >= threshold
-  for (auto& i : entry->deltas) {
-    if (i.delta != 0 && i.rpl == BERTI_R && i.conf >= confidence_threshold) {
-      res.push_back(i);
-    }
-  }
-
-#if DRAM_PREFETCH_SORT
-  // Sort the entries by confidence (higher first), then by delta size
-  if (!res.empty()) {
-    std::sort(std::begin(res), std::end(res), [](const delta_t& a, const delta_t& b) {
-      if (a.conf > b.conf)
-        return true; // Higher confidence first
-      if (a.conf < b.conf)
-        return false;
-
-      // If confidence is equal, prefer smaller deltas
-      return std::abs(a.delta) < std::abs(b.delta);
-    });
-  }
-#endif
-
-  return 1;
-}
-
 void Berti::find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, uint64_t line_addr)
 { 
   // We were tracking this miss
@@ -1022,7 +1187,16 @@ void CACHE::prefetcher_initialize()
 }
 
 void CACHE::prefetcher_cycle_operate()
-{}
+{
+  // We select the structures for every cpu
+  latencyt = bigPicture[cpu].latencyt;
+  scache = bigPicture[cpu].scache;
+  historyt = bigPicture[cpu].historyt;
+  berti = bigPicture[cpu].berti;
+
+  // Issue delayed prefetches
+  berti->issue_delayed_prefetches(current_cycle, this);
+}
 
 uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, 
                                          uint8_t cache_hit, bool useful_prefetch, 
@@ -1133,13 +1307,9 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
   }
 
   // New DRAM warming logic for low-confidence deltas
-  if (DRAM_PREFETCH_ENABLED && llc_static) {
-    // Get only the low confidence deltas suitable for DRAM warming
+  if (DRAM_PREFETCH_ENABLED && CACHE::llc_static) {
     std::vector<delta_t> warming_deltas;
     if (berti->get_dram_prefetch_candidates(ip_hash, warming_deltas, DRAM_PREFETCH_THRESHOLD)) {
-      uint64_t current_dram_prefetch_issued = 0;
-
-      // Process each delta
       for (auto& i : warming_deltas) {
         uint64_t p_addr = (line_addr + i.delta) << LOG2_BLOCK_SIZE;
         uint64_t p_b_addr = (p_addr >> LOG2_BLOCK_SIZE);
@@ -1148,16 +1318,8 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip,
         if (latencyt->get(p_b_addr) || p_addr == 0)
           continue;
 
-        // Issue DRAM warming prefetch to LLC with fill_this_level=false
-        if (prefetch_line(p_addr, false, metadata_in, true)) {
-          if constexpr (champsim::debug_print) {
-            std::cout << "[BERTI] DRAM warming prefetch delta: " << i.delta;
-            std::cout << " confidence: " << i.conf;
-            std::cout << " address: " << std::hex << p_addr << std::dec << std::endl;
-          }
-          dram_prefetch_issued++;
-          current_dram_prefetch_issued++;
-        }
+        // Add to buffer instead of issuing directly
+        berti->add_to_low_confidence_buffer(p_addr, metadata_in, current_cycle, i.conf);
       }
     }
   }
@@ -1252,6 +1414,19 @@ void CACHE::prefetcher_final_stats()
 #ifdef DRAM_PREFETCH_SORT
   std::cout << " | ordering enabled";
 #endif
+  std::cout << std::endl;
 
+  std::cout << "BERTI_TRI DELAYED_PREFETCH_STATS:";
+  std::cout << " total_issued=" << dram_prefetch_issued;
+  std::cout << " late_removed=" << berti->late_removed;
+  std::cout << " times_throttled=" << berti->throttled_prefetches;
+  std::cout << " avg_delay=";
+  if (average_latency.num > 0) {
+    std::cout << (average_latency.average * LOW_CONF_AVG_DELAY_FACTOR);
+  } else {
+    std::cout << "unknown";
+  }
+  std::cout << " avg_delay_factor=" << LOW_CONF_AVG_DELAY_FACTOR;
+  std::cout << " timing_window=" << LOW_CONF_LATE_SLACK << "cycles";
   std::cout << std::endl;
 }

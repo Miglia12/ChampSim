@@ -213,7 +213,7 @@ namespace berti_space
       std::queue<uint64_t> bertit_queue;
      
       uint64_t size = 0;
-  
+
       bool static compare_greater_delta(delta_t a, delta_t b);
       bool static compare_rpl(delta_t a, delta_t b);
   
@@ -223,11 +223,32 @@ namespace berti_space
   
     public:
       Berti(uint64_t p_size) : size(p_size) {};
+
+      // Buffer for delayed low-confidence prefetches
+      struct delayed_prefetch {
+        uint64_t addr;
+        uint32_t metadata;
+        uint64_t ready_cycle;    // When to issue this prefetch
+        uint64_t confidence;     // Confidence of this prefetch
+        uint64_t creation_cycle; // When this prefetch was added to buffer
+      };
+      std::vector<delayed_prefetch> low_confidence_buffer;
+
+      // Statistics for delayed prefetch mechanism
+      uint64_t late_removed = 0;         // Number of prefetches removed for missing their timing window
+      uint64_t throttled_prefetches = 0; // Number of times prefetch issuing was throttled
+
       void find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, 
           uint64_t line_addr);
       uint8_t get(uint64_t tag, std::vector<delta_t> &res);
       uint8_t get_dram_prefetch_candidates(uint64_t tag, std::vector<delta_t>& res, uint8_t confidence_threshold = 0);
       uint64_t ip_hash(uint64_t ip);
+      // Calculate minimum safe delay to ensure ordering
+      uint64_t calculate_safe_delay(uint64_t current_cycle);
+      // Add to low confidence buffer
+      void add_to_low_confidence_buffer(uint64_t addr, uint32_t metadata, uint64_t current_cycle, uint64_t confidence);
+      // Issue prefetches from low confidence buffer
+      void issue_delayed_prefetches(uint64_t current_cycle, CACHE* cache_ptr);
   };
   
   LatencyTable *latencyt;
