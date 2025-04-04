@@ -59,11 +59,11 @@ uint64_t Berti::calculate_safe_delay(uint64_t current_cycle)
   }
 
   // Enforce min/max bounds
-  uint64_t safe_delay = std::max(static_cast<uint64_t>(LOW_CONF_MIN_DELAY), std::min(static_cast<uint64_t>(LOW_CONF_MAX_DELAY), safe_delay));
+  uint64_t safe_delay = std::max(static_cast<uint64_t>(LOW_CONF_MIN_DELAY), std::min(static_cast<uint64_t>(LOW_CONF_MAX_DELAY), base_delay));
 
   if constexpr (champsim::debug_print) {
-    std::cout << "[BERTI] calculate_safe_delay: base=" << base_delay << " with_margin=" << safe_delay << " avg_latency=" << average_latency.average
-              << " samples=" << average_latency.num << std::endl;
+    std::cout << "[BERTI] calculate_safe_delay: base=" << base_delay << " adjusted=" << safe_delay
+              << " adjusted_avg_latency=" << average_latency.average * LOW_CONF_AVG_DELAY_FACTOR << " samples=" << average_latency.num << std::endl;
   }
 
   return safe_delay;
