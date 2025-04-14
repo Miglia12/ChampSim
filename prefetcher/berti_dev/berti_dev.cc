@@ -27,7 +27,7 @@
 using namespace berti_dev_params;
 
 // Helper function to get the current cycle
-inline uint64_t get_current_cycle() { return static_cast<uint64_t>(intern_->current_time.time_since_epoch() / intern_->clock_period); }
+inline uint64_t get_current_cycle(CACHE* cache) { return static_cast<uint64_t>(cache->current_time.time_since_epoch() / cache->clock_period); }
 
 /******************************************************************************/
 /*                      Latency table functions                               */
@@ -1021,7 +1021,7 @@ uint32_t berti_dev::prefetcher_cache_operate(champsim::address addr, champsim::a
     if constexpr (champsim::debug_print)
       std::cout << "[BERTI] operate cache miss" << std::endl;
 
-    uint64_t current_cycle = get_current_cycle();
+    uint64_t current_cycle = get_current_cycle(intern_);
     latencyt->add(line_addr, hashed_ip, false, current_cycle); // Add @ to latency
     historyt->add(hashed_ip, line_addr, current_cycle);        // Add to the table
   } else if (cache_hit && scache->is_pf(line_addr))          // Hit bc prefetch
@@ -1036,7 +1036,7 @@ uint32_t berti_dev::prefetcher_cache_operate(champsim::address addr, champsim::a
     if (latency > LAT_MASK)
       latency = 0;
 
-    uint64_t current_cycle = get_current_cycle();
+    uint64_t current_cycle = get_current_cycle(intern_);
     find_and_update(latency, hashed_ip, current_cycle & TIME_MASK, line_addr);
     historyt->add(hashed_ip, line_addr, current_cycle & TIME_MASK);
   } else {
@@ -1098,7 +1098,7 @@ uint32_t berti_dev::prefetcher_cache_operate(champsim::address addr, champsim::a
 
       if (fill_this_level) {
         if (!scache->get(pf_block_addr)) {
-          uint64_t current_cycle = get_current_cycle();
+          uint64_t current_cycle = get_current_cycle(intern_);
           latencyt->add(pf_block_addr, hashed_ip, true, current_cycle);
         }
       }
@@ -1122,7 +1122,7 @@ uint32_t berti_dev::prefetcher_cache_fill(champsim::address addr, long set, long
     std::cout << " latency: " << latency << std::endl;
   }
 
-  uint64_t current_cycle = get_current_cycle();
+  uint64_t current_cycle = get_current_cycle(intern_);
   if (cycle != 0 && ((current_cycle & TIME_MASK) > cycle))
     latency = (current_cycle & TIME_MASK) - cycle;
 
