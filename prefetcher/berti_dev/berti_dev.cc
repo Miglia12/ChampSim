@@ -13,7 +13,7 @@
  * @Email: agusnt@unizar.es
  * @Date: 22/11/2022
  *
- * Port to new ChampSim framework.
+ * Port to new ChampSim (December 2024 release).
  *
  * Cite this:
  *
@@ -27,7 +27,7 @@
 using namespace berti_dev_params;
 
 // Helper function to get the current cycle
-inline uint64_t get_current_cycle(CACHE* cache) { return static_cast<uint64_t>(cache->current_time.time_since_epoch() / cache->clock_period); }
+inline uint64_t get_current_cycle() { return static_cast<uint64_t>(intern_->current_time.time_since_epoch() / intern_->clock_period); }
 
 /******************************************************************************/
 /*                      Latency table functions                               */
@@ -43,7 +43,7 @@ uint8_t berti_dev::LatencyTable::add(champsim::block_number addr, uint64_t tag, 
    * Save if possible the new miss into the pqmshr (latency) table
    *
    * Parameters:
-   *  - addr: block address
+   *  - addr: address without cache offset
    *  - access: is the entry accessed by a demand request
    *  - cycle: time to use in the latency table
    *
@@ -97,7 +97,7 @@ uint64_t berti_dev::LatencyTable::del(champsim::block_number addr)
    * Remove the address from the latency table
    *
    * Parameters:
-   *  - addr: block address
+   *  - addr: address without cache offset
    *
    *  Return: the latency of the address
    */
@@ -142,7 +142,7 @@ uint64_t berti_dev::LatencyTable::get(champsim::block_number addr)
    * Return time or 0 if the addr is or is not in the pqmshr (latency) table
    *
    * Parameters:
-   *  - addr: block address
+   *  - addr: address without cache offset
    *
    * Return: time if the line is in the latency table, otherwise 0
    */
@@ -173,7 +173,7 @@ uint64_t berti_dev::LatencyTable::get_tag(champsim::block_number addr)
    * Return IP-Tag or 0 if the addr is or is not in the pqmshr (latency) table
    *
    * Parameters:
-   *  - addr: block address
+   *  - addr: address without cache offset
    *
    * Return: ip-tag if the line is in the latency table, otherwise 0
    */
@@ -226,7 +226,7 @@ bool berti_dev::ShadowCache::add(uint32_t set, uint32_t way, champsim::block_num
    * Parameters:
    *      - set: cache set
    *      - way: cache way
-   *      - addr: cache block address
+   *      - addr: cache block v_addr
    *      - pf: is this a prefetch
    *      - lat: latency value
    */
@@ -249,7 +249,7 @@ bool berti_dev::ShadowCache::get(champsim::block_number addr)
 {
   /*
    * Parameters:
-   *      - addr: cache block address
+   *      - addr: cache block v_addr
    *
    * Return: true if the addr is in the l1d cache, false otherwise
    */
@@ -277,7 +277,7 @@ void berti_dev::ShadowCache::set_pf(champsim::block_number addr, bool pf)
 {
   /*
    * Parameters:
-   *      - addr: cache block address
+   *      - addr: cache block v_addr
    *
    * Return: change value of pf field
    */
@@ -308,7 +308,7 @@ bool berti_dev::ShadowCache::is_pf(champsim::block_number addr)
 {
   /*
    * Parameters:
-   *      - addr: cache block address
+   *      - addr: cache block v_addr
    *
    * Return: True if the saved one is a prefetch
    */
@@ -341,7 +341,7 @@ uint64_t berti_dev::ShadowCache::get_latency(champsim::block_number addr)
    * Init shadow cache
    *
    * Parameters:
-   *      - addr: cache block address
+   *      - addr: cache block v_addr
    *
    * Return: the saved latency
    */
@@ -402,10 +402,8 @@ void berti_dev::HistoryTable::add(uint64_t tag, champsim::block_number addr, uin
   uint16_t set = tag & TABLE_SET_MASK;
   // If the latest entry is the same, we do not add it
   if (history_pointers[set] == &historyt[set][ways - 1]) {
-    // Extract addr masked with ADDR_MASK
-    uint64_t masked_addr = addr.to<uint64_t>() & ADDR_MASK;
 
-    // Get the masked addr from the history table
+    uint64_t masked_addr = addr.to<uint64_t>() & ADDR_MASK;
     uint64_t history_addr = historyt[set][0].addr.to<uint64_t>() & ADDR_MASK;
 
     if (masked_addr == history_addr)
@@ -522,9 +520,7 @@ uint16_t berti_dev::HistoryTable::get(uint32_t latency, uint64_t tag, champsim::
 /******************************************************************************/
 /*                        Berti table functions                               */
 /******************************************************************************/
-berti_dev::Berti::Berti(uint64_t p_size) : size(p_size) {}
-
-void berti_dev::Berti::increase_conf_tag(uint64_t tag)
+void berti_dev::increase_conf_tag(uint64_t tag)
 {
   /*
    * Increase the global confidence of the deltas associated to the tag
@@ -578,7 +574,7 @@ void berti_dev::Berti::increase_conf_tag(uint64_t tag)
     std::cout << std::endl;
 }
 
-void berti_dev::Berti::add(uint64_t tag, int64_t delta)
+void berti_dev::add(uint64_t tag, int64_t delta)
 {
   /*
    * Save the new information into the history table
@@ -593,15 +589,15 @@ void berti_dev::Berti::add(uint64_t tag, int64_t delta)
     std::cout << " delta: " << delta;
   }
 
-  auto add_delta = [](auto delta, auto entry) {
+  auto add_delta = [](auto new_delta, auto entry) {
     // Lambda function to add a new element
-    Delta new_delta;
-    new_delta.delta = delta;
-    new_delta.conf = CONFIDENCE_INIT;
-    new_delta.rpl = BERTI_R;
+    Delta new_delta_entry;
+    new_delta_entry.delta = new_delta;
+    new_delta_entry.conf = CONFIDENCE_INIT;
+    new_delta_entry.rpl = BERTI_R;
     auto it = std::find_if(std::begin(entry->deltas), std::end(entry->deltas), [](const auto i) { return (i.delta == 0); });
     assert(it != std::end(entry->deltas));
-    *it = new_delta;
+    *it = new_delta_entry;
   };
 
   if (bertit.find(tag) == bertit.end()) {
@@ -679,7 +675,7 @@ void berti_dev::Berti::add(uint64_t tag, int64_t delta)
   }
 }
 
-uint8_t berti_dev::Berti::get(uint64_t tag, std::vector<Delta>& res)
+uint8_t berti_dev::get(uint64_t tag, std::vector<Delta>& res)
 {
   /*
    * Get deltas associated with a tag
@@ -732,7 +728,7 @@ uint8_t berti_dev::Berti::get(uint64_t tag, std::vector<Delta>& res)
   return 1;
 }
 
-void berti_dev::Berti::find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, champsim::block_number line_addr)
+void berti_dev::find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, champsim::block_number line_addr)
 {
   // We were tracking this miss
   uint64_t tags[HISTORY_TABLE_WAYS];
@@ -760,7 +756,7 @@ void berti_dev::Berti::find_and_update(uint64_t latency, uint64_t tag, uint64_t 
   }
 }
 
-bool berti_dev::Berti::compare_rpl(Delta a, Delta b)
+bool berti_dev::compare_rpl(Delta a, Delta b)
 {
   if (a.rpl == BERTI_R && b.rpl != BERTI_R)
     return 1;
@@ -778,7 +774,7 @@ bool berti_dev::Berti::compare_rpl(Delta a, Delta b)
   }
 }
 
-bool berti_dev::Berti::compare_greater_delta(Delta a, Delta b)
+bool berti_dev::compare_greater_delta(Delta a, Delta b)
 {
   // Sorted stride when the confidence is full
   if (a.rpl == BERTI_L1 && b.rpl != BERTI_L1)
@@ -804,7 +800,7 @@ bool berti_dev::Berti::compare_greater_delta(Delta a, Delta b)
   }
 }
 
-uint64_t berti_dev::Berti::ip_hash(uint64_t ip)
+uint64_t berti_dev::ip_hash(uint64_t ip)
 {
   /*
    * IP hash function
@@ -913,12 +909,23 @@ uint64_t berti_dev::Berti::ip_hash(uint64_t ip)
   return ip; // No IP hash
 }
 
+void berti_dev::initialize_berti_table(uint64_t table_size)
+{
+  bertit.clear();
+  while (!bertit_queue.empty())
+    bertit_queue.pop();
+  this->size = table_size;
+}
+
 /******************************************************************************/
 /*                        Module Interface Functions                          */
 /******************************************************************************/
 
 void berti_dev::prefetcher_initialize()
 {
+
+  initialize_berti_table(BERTI_TABLE_DELTA_SIZE);
+
   // Calculate latency table size
   uint64_t latency_table_size = intern_->MSHR_SIZE;
   for (auto const& i : intern_->get_rq_size())
@@ -929,13 +936,9 @@ void berti_dev::prefetcher_initialize()
     latency_table_size += i;
 
   // Initialize structures
-  latencyt = new LatencyTable(static_cast<int>(latency_table_size));
-  scache = new ShadowCache(intern_->NUM_SET, intern_->NUM_WAY);
-  historyt = new HistoryTable();
-  berti = new Berti(BERTI_TABLE_DELTA_SIZE);
-
-  // Connect Berti to the history table
-  berti->set_history_table(historyt);
+  latencyt = std::make_unique<LatencyTable>(static_cast<int>(latency_table_size));
+  scache = std::make_unique<ShadowCache>(intern_->NUM_SET, intern_->NUM_WAY);
+  historyt = std::make_unique<HistoryTable>();
 
   std::cout << "Berti Prefetcher" << std::endl;
 
@@ -1011,16 +1014,16 @@ uint32_t berti_dev::prefetcher_cache_operate(champsim::address addr, champsim::a
     std::cout << " line_address: " << line_addr << std::dec << std::endl;
   }
 
-  uint64_t ip_hash = berti->ip_hash(ip.to<uint64_t>()) & IP_MASK;
+  uint64_t hashed_ip = ip_hash(ip.to<uint64_t>()) & IP_MASK;
 
   if (!cache_hit) // This is a miss
   {
     if constexpr (champsim::debug_print)
       std::cout << "[BERTI] operate cache miss" << std::endl;
 
-    uint64_t current_cycle = get_current_cycle(intern_);
-    latencyt->add(line_addr, ip_hash, false, current_cycle); // Add @ to latency
-    historyt->add(ip_hash, line_addr, current_cycle);        // Add to the table
+    uint64_t current_cycle = get_current_cycle();
+    latencyt->add(line_addr, hashed_ip, false, current_cycle); // Add @ to latency
+    historyt->add(hashed_ip, line_addr, current_cycle);        // Add to the table
   } else if (cache_hit && scache->is_pf(line_addr))          // Hit bc prefetch
   {
     if constexpr (champsim::debug_print)
@@ -1033,16 +1036,16 @@ uint32_t berti_dev::prefetcher_cache_operate(champsim::address addr, champsim::a
     if (latency > LAT_MASK)
       latency = 0;
 
-    uint64_t current_cycle = get_current_cycle(intern_);
-    berti->find_and_update(latency, ip_hash, current_cycle & TIME_MASK, line_addr);
-    historyt->add(ip_hash, line_addr, current_cycle & TIME_MASK);
+    uint64_t current_cycle = get_current_cycle();
+    find_and_update(latency, hashed_ip, current_cycle & TIME_MASK, line_addr);
+    historyt->add(hashed_ip, line_addr, current_cycle & TIME_MASK);
   } else {
     if constexpr (champsim::debug_print)
       std::cout << "[BERTI] operate cache hit" << std::endl;
   }
 
   std::vector<Delta> deltas;
-  berti->get(ip_hash, deltas);
+  get(hashed_ip, deltas);
 
   bool first_issue = true;
   for (auto i : deltas) {
@@ -1095,8 +1098,8 @@ uint32_t berti_dev::prefetcher_cache_operate(champsim::address addr, champsim::a
 
       if (fill_this_level) {
         if (!scache->get(pf_block_addr)) {
-          uint64_t current_cycle = get_current_cycle(intern_);
-          latencyt->add(pf_block_addr, ip_hash, true, current_cycle);
+          uint64_t current_cycle = get_current_cycle();
+          latencyt->add(pf_block_addr, hashed_ip, true, current_cycle);
         }
       }
     }
@@ -1119,7 +1122,7 @@ uint32_t berti_dev::prefetcher_cache_fill(champsim::address addr, long set, long
     std::cout << " latency: " << latency << std::endl;
   }
 
-  uint64_t current_cycle = get_current_cycle(intern_);
+  uint64_t current_cycle = get_current_cycle();
   if (cycle != 0 && ((current_cycle & TIME_MASK) > cycle))
     latency = (current_cycle & TIME_MASK) - cycle;
 
@@ -1142,7 +1145,7 @@ uint32_t berti_dev::prefetcher_cache_fill(champsim::address addr, long set, long
   scache->add(static_cast<uint32_t>(set), static_cast<uint32_t>(way), line_addr, prefetch, latency);
 
   if (latency != 0 && !prefetch) {
-    berti->find_and_update(latency, tag, cycle, line_addr);
+    find_and_update(latency, tag, cycle, line_addr);
   }
   return metadata_in;
 }

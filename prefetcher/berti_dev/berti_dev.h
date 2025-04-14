@@ -13,7 +13,7 @@
  * @Email: agusnt@unizar.es
  * @Date: 22/11/2022
  *
- * Port to new ChampSim framework.
+ * Port to new ChampSim (December 2024 release).
  *
  * Cite this:
  *
@@ -38,6 +38,7 @@
 #include <cstdio>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <queue>
 #include <stdlib.h>
 #include <time.h>
@@ -164,46 +165,45 @@ struct berti_dev : public champsim::modules::prefetcher {
     uint16_t get(uint32_t latency, uint64_t tag, champsim::block_number act_addr, uint64_t* tags, champsim::block_number* addr, uint64_t cycle);
   };
 
-  class Berti
-  {
-    /* Berti Table */
-  private:
-    struct berti {
-      std::array<Delta, BERTI_TABLE_DELTA_SIZE> deltas;
-      uint64_t conf = 0;
-      uint64_t total_used = 0;
-    };
-
-    std::map<uint64_t, berti*> bertit;
-    std::queue<uint64_t> bertit_queue;
-
-    uint64_t size = 0;
-    HistoryTable* historyt = nullptr;
-
-    static bool compare_greater_delta(Delta a, Delta b);
-    static bool compare_rpl(Delta a, Delta b);
-
-    void increase_conf_tag(uint64_t tag);
-    void conf_tag(uint64_t tag);
-    void add(uint64_t tag, int64_t delta);
-
-  public:
-    Berti(uint64_t p_size);
-    void set_history_table(HistoryTable* history_table) { historyt = history_table; }
-    void find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, champsim::block_number line_addr);
-    uint8_t get(uint64_t tag, std::vector<Delta>& res);
-    uint64_t ip_hash(uint64_t ip);
+  /* Berti */
+private:
+  struct berti {
+    std::array<Delta, BERTI_TABLE_DELTA_SIZE> deltas;
+    uint64_t conf = 0;
+    uint64_t total_used = 0;
   };
+  std::map<uint64_t, berti*> bertit;
+  std::queue<uint64_t> bertit_queue;
 
-  LatencyTable* latencyt;
-  ShadowCache* scache;
-  HistoryTable* historyt;
-  Berti* berti;
+  uint64_t size;
+
+  // Berti components
+  std::unique_ptr<LatencyTable> latencyt;
+  std::unique_ptr<ShadowCache> scache;
+  std::unique_ptr<HistoryTable> historyt;
+
+  // Berti table initialize (instead of constructor)
+  void initialize_berti_table(uint64_t table_size);
+
+  // Helper functions originally from the Berti class
+  static bool compare_greater_delta(Delta a, Delta b);
+  static bool compare_rpl(Delta a, Delta b);
+
+  void increase_conf_tag(uint64_t tag);
+  void conf_tag(uint64_t tag);
+  void add(uint64_t tag, int64_t delta);
+
+  // Berti class methods
+  void find_and_update(uint64_t latency, uint64_t tag, uint64_t cycle, champsim::block_number line_addr);
+  uint8_t get(uint64_t tag, std::vector<Delta>& res);
+  uint64_t ip_hash(uint64_t ip);
+
+public:
 
   // Constructor
   using prefetcher::prefetcher;
 
-  // Required methods
+  // Interface methods
   void prefetcher_initialize();
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in);
