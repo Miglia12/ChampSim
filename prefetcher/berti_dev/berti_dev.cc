@@ -914,6 +914,7 @@ void berti_dev::initialize_berti_table(uint64_t table_size)
   bertit.clear();
   while (!bertit_queue.empty())
     bertit_queue.pop();
+    
   this->size = table_size;
 }
 
