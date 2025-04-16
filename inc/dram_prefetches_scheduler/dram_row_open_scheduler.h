@@ -76,7 +76,6 @@ public:
   void print_stats(std::string_view name = "DramRowOpenScheduler") const { m_stats.print(name); }
 
 private:
-  // Member variables with m_ prefix for clarity
   size_t m_max_size;
   cycle_t m_ready_threshold;
   cycle_t m_slack;
@@ -98,11 +97,10 @@ private:
   void issue_ready_candidates(cycle_t now, size_t max_issue, request_callback_t try_issue)
   {
     // Stage 3: Selecting
-    // Create a vector of ready entries
+    // First collect all ready requests
     std::vector<TimedEntry> ready_entries;
     ready_entries.reserve(std::min(m_queue.size(), max_issue));
 
-    // Collect ready entries
     for (const auto& entry : m_queue) {
       if (now - entry.inserted_at >= m_ready_threshold)
         ready_entries.push_back(entry);
