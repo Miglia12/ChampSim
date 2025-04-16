@@ -34,6 +34,8 @@
 #include "extent_set.h"
 #include "operable.h"
 
+constexpr bool DRAM_ROW_OPEN_PAYS_TCAS = false; // Set to true if speculative opens should pay tCAS
+
 struct DRAM_ADDRESS_MAPPING {
   constexpr static std::size_t SLICER_OFFSET_IDX = 0;
   constexpr static std::size_t SLICER_CHANNEL_IDX = 1;
@@ -103,6 +105,8 @@ struct DRAM_CHANNEL final : public champsim::operable {
 
     uint32_t pf_metadata = 0;
 
+    access_type type = access_type::LOAD;
+    
     champsim::address address{};
     champsim::address v_address{};
     champsim::address data{};
@@ -125,6 +129,8 @@ struct DRAM_CHANNEL final : public champsim::operable {
 
   struct BANK_REQUEST {
     bool valid = false, row_buffer_hit = false, need_refresh = false, under_refresh = false;
+    bool opened_speculatively = false; // Whether this row was opened by a speculative request
+    bool has_been_accessed = false;    // Track if this speculatively opened row has been accessed
 
     std::optional<std::size_t> open_row{};
 

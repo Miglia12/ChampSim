@@ -137,6 +137,15 @@ std::vector<std::string> champsim::plain_printer::format(DRAM_CHANNEL::stats_typ
   lines.push_back(fmt::format("  ROW_BUFFER_MISS: {:10}", stats.WQ_ROW_BUFFER_MISS));
   lines.push_back(fmt::format("  FULL: {:10}", stats.WQ_FULL));
 
+  // Add speculative DRAM row open statistics
+  if (stats.DRAM_ROW_OPEN_REQUESTS > 0) {
+    lines.push_back(fmt::format("{} SPECULATIVE ROW OPENS: {:10}", stats.name, stats.DRAM_ROW_OPEN_REQUESTS));
+    lines.push_back(fmt::format("  USEFUL OPENS: {:10}", stats.DRAM_ROW_OPEN_USEFUL));
+    lines.push_back(fmt::format("  USELESS OPENS: {:10}", stats.DRAM_ROW_OPEN_USELESS));
+    lines.push_back(
+        fmt::format("  USEFUL RATIO: {:.2f}%", 100.0f * static_cast<float>(stats.DRAM_ROW_OPEN_USEFUL) / static_cast<float>(stats.DRAM_ROW_OPEN_REQUESTS)));
+  }
+
   if (stats.refresh_cycles > 0)
     lines.push_back(fmt::format("{} REFRESHES ISSUED: {:10}", stats.name, stats.refresh_cycles));
   else
@@ -144,7 +153,6 @@ std::vector<std::string> champsim::plain_printer::format(DRAM_CHANNEL::stats_typ
 
   return lines;
 }
-
 void champsim::plain_printer::print(champsim::phase_stats& stats)
 {
   auto lines = format(stats);

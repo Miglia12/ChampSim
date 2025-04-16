@@ -145,6 +145,14 @@ long DRAM_CHANNEL::finish_dbus_request()
   long progress{0};
 
   if (active_request != std::end(bank_request) && active_request->ready_time <= current_time) {
+
+    // If this was a speculatively opened row that was never accessed and being closed now, count as useless
+    if (active_request->opened_speculatively && !active_request->has_been_accessed) {
+      ++sim_stats.DRAM_ROW_OPEN_USELESS;
+      active_request->opened_speculatively = false; 
+      active_request->has_been_accessed = false;    
+    }
+
     response_type response{active_request->pkt->value().address, active_request->pkt->value().v_address, active_request->pkt->value().data,
                            active_request->pkt->value().pf_metadata, active_request->pkt->value().instr_depend_on_me};
     for (auto* ret : active_request->pkt->value().to_return) {
@@ -178,6 +186,12 @@ long DRAM_CHANNEL::schedule_refresh()
 
   // go through each bank, and handle refreshes
   for (auto& b_req : bank_request) {
+    // If this was a speculatively opened row that was never accessed and being closed now, count as useless
+    // Not quite sure abotu this
+    // if (b_req.valid && b_req.open_row.has_value() && b_req.opened_speculatively && !b_req.has_been_accessed) {
+    //   ++sim_stats.DRAM_ROW_OPEN_USELESS;
+    // }
+
     // refresh is now needed for this bank
     if (schedule_refresh) {
       b_req.need_refresh = true;
@@ -192,6 +206,8 @@ long DRAM_CHANNEL::schedule_refresh()
     else if (b_req.under_refresh && b_req.ready_time <= current_time) {
       b_req.under_refresh = false;
       b_req.open_row.reset();
+      b_req.opened_speculatively = false; // Reset speculative flag
+      b_req.has_been_accessed = false;    // Reset access tracking
       progress++;
     }
 
@@ -219,9 +235,16 @@ void DRAM_CHANNEL::swap_write_mode()
     for (auto it = std::begin(bank_request); it != std::end(bank_request); ++it) {
       // Leave active request on the data bus
       if (it != active_request && it->valid) {
+        // Track useless speculative opens when closing rows
+        if (it->open_row.has_value() && it->opened_speculatively && !it->has_been_accessed) {
+          ++sim_stats.DRAM_ROW_OPEN_USELESS;
+        }
+
         // Leave rows charged
         if (it->ready_time < (current_time + tCAS)) {
           it->open_row.reset();
+          it->opened_speculatively = false; // Reset speculative flag
+          it->has_been_accessed = false;    // Reset access tracking
         }
 
         // This bank is ready for another DRAM request
@@ -271,14 +294,22 @@ long DRAM_CHANNEL::populate_dbus()
       bankgroup_readytime[op_bankgroup] = current_time + DRAM_DBUS_RETURN_TIME + DRAM_DBUS_BANKGROUP_STALL;
 
       if (iter_next_process->row_buffer_hit) {
+        // If this is a hit on a speculatively opened row that hasn't been accessed yet
+        if (iter_next_process->opened_speculatively && !iter_next_process->has_been_accessed) {
+          ++sim_stats.DRAM_ROW_OPEN_USEFUL;
+          iter_next_process->has_been_accessed = true;
+        }
+
         if (write_mode) {
           ++sim_stats.WQ_ROW_BUFFER_HIT;
-        } else {
+        } else if (iter_next_process->pkt->value().type != access_type::DRAM_ROW_OPEN) {
+          // Only count regular RQ hits, not speculative row open hits
           ++sim_stats.RQ_ROW_BUFFER_HIT;
         }
       } else if (write_mode) {
         ++sim_stats.WQ_ROW_BUFFER_MISS;
-      } else {
+      } else if (iter_next_process->pkt->value().type != access_type::DRAM_ROW_OPEN) {
+        // Only count regular RQ misses, not speculative row open misses
         ++sim_stats.RQ_ROW_BUFFER_MISS;
       }
 
@@ -350,11 +381,40 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
     if (!bank_request[op_idx].valid && !bank_request[op_idx].under_refresh) {
       bool row_buffer_hit = (bank_request[op_idx].open_row.has_value() && *(bank_request[op_idx].open_row) == op_row);
 
-      // this bank is now busy
+      // If we're closing a row that was speculatively opened but never accessed, count it as useless
+      if (bank_request[op_idx].open_row.has_value() && bank_request[op_idx].opened_speculatively && !bank_request[op_idx].has_been_accessed
+          && !row_buffer_hit) {
+        ++sim_stats.DRAM_ROW_OPEN_USELESS;
+      }
+
+      // Determine the delay for row activation, based on whether a row is already open.
       auto row_charge_delay = champsim::chrono::clock::duration{bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD};
-      bank_request[op_idx] = {true,  row_buffer_hit,        false,
-                              false, std::optional{op_row}, current_time + tCAS + (row_buffer_hit ? champsim::chrono::clock::duration{} : row_charge_delay),
+
+      // Only non-speculative requests pay the tCAS penalty if DRAM_ROW_OPEN_PAYS_TCAS is false
+      auto cas_penalty = (pkt->value().type == access_type::DRAM_ROW_OPEN && !DRAM_ROW_OPEN_PAYS_TCAS) ? champsim::chrono::clock::duration{}
+                                                                                                       // Speculative request: no tCAS
+                                                                                                       : tCAS; // Normal request: pay tCAS
+
+      // Now mark the bank as busy with the new scheduled ready time.
+      bank_request[op_idx] = {true,
+                              row_buffer_hit,
+                              false,
+                              false,
+                              false,
+                              false, // Reset speculative tracking flags
+                              std::optional{op_row},
+                              current_time + cas_penalty + (row_buffer_hit ? champsim::chrono::clock::duration{} : row_charge_delay),
                               pkt};
+
+      // Track if this row is being opened by a speculative request
+      bank_request[op_idx].opened_speculatively = (pkt->value().type == access_type::DRAM_ROW_OPEN);
+      bank_request[op_idx].has_been_accessed = false;
+
+      // Count speculative open requests
+      if (pkt->value().type == access_type::DRAM_ROW_OPEN) {
+        ++sim_stats.DRAM_ROW_OPEN_REQUESTS;
+      }
+
       pkt->value().scheduled = true;
       pkt->value().ready_time = champsim::chrono::clock::time_point::max();
 
@@ -508,7 +568,7 @@ void MEMORY_CONTROLLER::initiate_requests()
 }
 
 DRAM_CHANNEL::request_type::request_type(const typename champsim::channel::request_type& req)
-    : pf_metadata(req.pf_metadata), address(req.address), v_address(req.address), data(req.data), instr_depend_on_me(req.instr_depend_on_me)
+    : pf_metadata(req.pf_metadata), type(req.type), address(req.address), v_address(req.address), data(req.data), instr_depend_on_me(req.instr_depend_on_me)
 {
   asid[0] = req.asid[0];
   asid[1] = req.asid[1];

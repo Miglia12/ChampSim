@@ -9,5 +9,10 @@ dram_stats operator-(dram_stats lhs, dram_stats rhs)
   lhs.RQ_ROW_BUFFER_HIT -= rhs.RQ_ROW_BUFFER_HIT;
   lhs.RQ_ROW_BUFFER_MISS -= rhs.RQ_ROW_BUFFER_MISS;
   lhs.WQ_FULL -= rhs.WQ_FULL;
+
+  lhs.DRAM_ROW_OPEN_REQUESTS -= rhs.DRAM_ROW_OPEN_REQUESTS;
+  lhs.DRAM_ROW_OPEN_USEFUL -= rhs.DRAM_ROW_OPEN_USEFUL;
+  lhs.DRAM_ROW_OPEN_USELESS -= rhs.DRAM_ROW_OPEN_USELESS;
+  
   return lhs;
 }

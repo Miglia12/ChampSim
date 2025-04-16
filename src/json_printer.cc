@@ -76,12 +76,24 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
 
 void to_json(nlohmann::json& j, const DRAM_CHANNEL::stats_type stats)
 {
-  j = nlohmann::json{{"RQ ROW_BUFFER_HIT", stats.RQ_ROW_BUFFER_HIT},
-                     {"RQ ROW_BUFFER_MISS", stats.RQ_ROW_BUFFER_MISS},
-                     {"WQ ROW_BUFFER_HIT", stats.WQ_ROW_BUFFER_HIT},
-                     {"WQ ROW_BUFFER_MISS", stats.WQ_ROW_BUFFER_MISS},
-                     {"AVG DBUS CONGESTED CYCLE", (std::ceil(stats.dbus_cycle_congested) / std::ceil(stats.dbus_count_congested))},
-                     {"REFRESHES ISSUED", stats.refresh_cycles}};
+  auto json_obj = nlohmann::json{{"RQ ROW_BUFFER_HIT", stats.RQ_ROW_BUFFER_HIT},
+                                 {"RQ ROW_BUFFER_MISS", stats.RQ_ROW_BUFFER_MISS},
+                                 {"WQ ROW_BUFFER_HIT", stats.WQ_ROW_BUFFER_HIT},
+                                 {"WQ ROW_BUFFER_MISS", stats.WQ_ROW_BUFFER_MISS},
+                                 {"AVG DBUS CONGESTED CYCLE", (std::ceil(stats.dbus_cycle_congested) / std::ceil(stats.dbus_count_congested))},
+                                 {"REFRESHES ISSUED", stats.refresh_cycles}};
+
+  // Add speculative DRAM row open statistics if any were issued
+  if (stats.DRAM_ROW_OPEN_REQUESTS > 0) {
+    float useful_ratio = static_cast<float>(stats.DRAM_ROW_OPEN_USEFUL) / static_cast<float>(stats.DRAM_ROW_OPEN_REQUESTS) * 100.0f;
+
+    json_obj["SPECULATIVE_ROW_OPENS"] = nlohmann::json{{"REQUESTS", stats.DRAM_ROW_OPEN_REQUESTS},
+                                                       {"USEFUL", stats.DRAM_ROW_OPEN_USEFUL},
+                                                       {"USELESS", stats.DRAM_ROW_OPEN_USELESS},
+                                                       {"USEFUL_RATIO", useful_ratio}};
+  }
+
+  j = json_obj;
 }
 
 namespace champsim

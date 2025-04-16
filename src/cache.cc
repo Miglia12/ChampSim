@@ -106,7 +106,7 @@ CACHE::mshr_type::mshr_type(const tag_lookup_type& req, champsim::chrono::clock:
 {
 }
 
-CACHE::mshr_type CACHE::mshr_type::merge(mshr_type predecessor, mshr_type successor)
+CACHE::mshr_type CACHE::mshr_type::merge(CACHE::mshr_type predecessor, CACHE::mshr_type successor)
 {
   std::vector<uint64_t> merged_instr{};
   std::vector<std::deque<response_type>*> merged_return{};
@@ -116,25 +116,26 @@ CACHE::mshr_type CACHE::mshr_type::merge(mshr_type predecessor, mshr_type succes
   std::set_union(std::begin(predecessor.to_return), std::end(predecessor.to_return), std::begin(successor.to_return), std::end(successor.to_return),
                  std::back_inserter(merged_return));
 
-  mshr_type retval{(successor.type == access_type::PREFETCH) ? predecessor : successor};
+  // DRAM_ROW_OPEN is the lowest priority - anything else takes precedence
+  mshr_type retval = (successor.type == access_type::DRAM_ROW_OPEN)     ? predecessor
+                     : (predecessor.type == access_type::DRAM_ROW_OPEN) ? successor
+                     : (successor.type == access_type::PREFETCH)        ? predecessor
+                                                                        : successor;
 
-  // set the time enqueued to the predecessor unless its a demand into prefetch, in which case we use the successor
-  retval.time_enqueued =
-      ((successor.type != access_type::PREFETCH && predecessor.type == access_type::PREFETCH)) ? successor.time_enqueued : predecessor.time_enqueued;
+  // Set the time enqueued appropriately
+  bool pred_is_speculative = (predecessor.type == access_type::PREFETCH || predecessor.type == access_type::DRAM_ROW_OPEN);
+  bool succ_is_speculative = (successor.type == access_type::PREFETCH || successor.type == access_type::DRAM_ROW_OPEN);
+  bool is_demand_into_speculative = (!succ_is_speculative && pred_is_speculative);
+
+  retval.time_enqueued = is_demand_into_speculative ? successor.time_enqueued : predecessor.time_enqueued;
   retval.instr_depend_on_me = merged_instr;
   retval.to_return = merged_return;
   retval.data_promise = predecessor.data_promise;
 
   if constexpr (champsim::debug_print) {
-    if (successor.type == access_type::PREFETCH) {
-      fmt::print("[MSHR] {} address {} type: {} into address {} type: {}\n", __func__, successor.address,
-                 access_type_names.at(champsim::to_underlying(successor.type)), predecessor.address,
-                 access_type_names.at(champsim::to_underlying(successor.type)));
-    } else {
-      fmt::print("[MSHR] {} address {} type: {} into address {} type: {}\n", __func__, predecessor.address,
-                 access_type_names.at(champsim::to_underlying(predecessor.type)), successor.address,
-                 access_type_names.at(champsim::to_underlying(successor.type)));
-    }
+    fmt::print("[MSHR] {} address {} type: {} merged with address {} type: {} -> type: {}\n", __func__, predecessor.address,
+               access_type_names.at(champsim::to_underlying(predecessor.type)), successor.address,
+               access_type_names.at(champsim::to_underlying(successor.type)), access_type_names.at(champsim::to_underlying(retval.type)));
   }
 
   return retval;
@@ -355,7 +356,8 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
     }
 
-    const bool send_to_rq = (prefetch_as_load || handle_pkt.type != access_type::PREFETCH);
+    const bool send_to_rq = (prefetch_as_load && handle_pkt.type == access_type::PREFETCH)
+                            || (handle_pkt.type != access_type::PREFETCH && handle_pkt.type != access_type::DRAM_ROW_OPEN);
     bool success = send_to_rq ? lower_level->add_rq(mshr_pkt.second) : lower_level->add_pq(mshr_pkt.second);
 
     if (!success) {
@@ -575,13 +577,13 @@ long CACHE::invalidate_entry(champsim::address inval_addr)
   return std::distance(begin, inv_way);
 }
 
-bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata, bool prefetch_at_llc)
+bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata, bool open_dram_row)
 {
-  // If we want to prefetch at LLC and we're not already the LLC
-  if (prefetch_at_llc && NAME != "LLC" && llc_static) {
-    // fmt::print("[{}] Forwarding prefetch to LLC for address: {}\n", NAME, pf_addr);
-    return llc_static->prefetch_line(pf_addr, fill_this_level, prefetch_metadata, false);
+  // If we want to open a DRAM row and we're not already the LLC
+  if (open_dram_row && NAME != "LLC" && llc_static) {
+    return llc_static->prefetch_line(pf_addr, false, prefetch_metadata, true);
   }
+
   ++sim_stats.pf_requested;
 
   if (std::size(internal_PQ) >= PQ_SIZE) {
@@ -589,14 +591,18 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   }
 
   request_type pf_packet;
-  pf_packet.type = access_type::PREFETCH;
+  // Use special type for DRAM row opens
+  pf_packet.type = open_dram_row ? access_type::DRAM_ROW_OPEN : access_type::PREFETCH;
   pf_packet.pf_metadata = prefetch_metadata;
   pf_packet.cpu = cpu;
   pf_packet.address = pf_addr;
   pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
   pf_packet.is_translated = !virtual_prefetch;
 
-  internal_PQ.emplace_back(pf_packet, true, !fill_this_level);
+  // For DRAM row opens, we always skip fill
+  bool skip_fill = open_dram_row ? true : !fill_this_level;
+  internal_PQ.emplace_back(pf_packet, true, skip_fill);
+
   ++sim_stats.pf_issued;
 
   return true;
@@ -913,6 +919,10 @@ void CACHE::end_phase(unsigned finished_cpu)
 template <typename T>
 bool CACHE::should_activate_prefetcher(const T& pkt) const
 {
+  // Speculative row opens shouldn't activate the prefetcher again
+  if (pkt.type == access_type::DRAM_ROW_OPEN)
+    return false;
+
   return !pkt.prefetch_from_this && std::count(std::begin(pref_activate_mask), std::end(pref_activate_mask), pkt.type) > 0;
 }
 
