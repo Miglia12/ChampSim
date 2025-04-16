@@ -11,7 +11,7 @@
 namespace dram_open
 {
 
-// Type aliases for better readability
+// Type aliases
 using cycle_t = uint64_t;
 using request_callback_t = std::function<bool(const DramRowOpenRequest&)>;
 
