@@ -904,7 +904,7 @@ void berti_tri::initialize_berti_table(uint64_t table_size)
 /*                   DRAM Row Opening methods                                 */
 /******************************************************************************/
 
-void berti_tri::get_dram_open_candidates(uint64_t tag, std::vector<Delta>& deltas, champsim::block_number base_addr, uint32_t metadata)
+void berti_tri::get_dram_open_candidates(uint64_t tag, champsim::block_number base_addr, uint32_t metadata)
 {
   /*
    * Similar to the original get() method, but only applies confidence-based filtering
@@ -912,7 +912,6 @@ void berti_tri::get_dram_open_candidates(uint64_t tag, std::vector<Delta>& delta
    *
    * Parameters:
    *  - tag: PC tag
-   *  - deltas: list of deltas (not used in this method)
    *  - base_addr: base address to prefetch from
    *  - metadata: prefetch metadata
    */
@@ -951,11 +950,16 @@ void berti_tri::get_dram_open_candidates(uint64_t tag, std::vector<Delta>& delta
 
   // Now issue prefetches for each identified delta
   for (auto& i : dram_open_deltas) {
+    // Calculate prefetch address
     champsim::block_number pf_block_addr = base_addr + i.delta;
     champsim::address pf_addr{pf_block_addr};
 
     // Skip if address is invalid
     if (pf_addr.to<uint64_t>() == 0)
+      continue;
+
+    // Skip if address is already in the latency table (already being fetched)
+    if (latencyt->get(pf_block_addr))
       continue;
 
     // Create and add request to scheduler
@@ -1189,7 +1193,7 @@ uint32_t berti_tri::prefetcher_cache_operate(champsim::address addr, champsim::a
   }
 
   // Collect candidates for DRAM row opening
-  get_dram_open_candidates(hashed_ip, deltas, line_addr, metadata_in);
+  get_dram_open_candidates(hashed_ip, line_addr, metadata_in);
 
   return metadata_in;
 }

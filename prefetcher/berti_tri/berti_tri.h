@@ -200,7 +200,7 @@ private:
   uint64_t ip_hash(uint64_t ip);
 
   // Helper methods for DRAM row warming
-  void get_dram_open_candidates(uint64_t tag, std::vector<Delta>& deltas, champsim::block_number base_addr, uint32_t metadata);
+  void get_dram_open_candidates(uint64_t tag, champsim::block_number base_addr, uint32_t metadata);
   uint64_t get_current_cycle();
 
 public:
