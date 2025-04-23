@@ -73,6 +73,9 @@ struct berti_tri : public champsim::modules::prefetcher {
   // Bandwidth control
   double DRAM_WARM_BW_FRACTION = DRAM_WARM_MAX_FRACTION;
 
+  // Reduce berti latency factor
+  double LATENCY_FACTOR = LATENCY_FACTOR_VALUE;
+
   // Scheduler instance
   std::unique_ptr<dram_open::DramRowOpenScheduler> row_scheduler;
 
@@ -112,6 +115,7 @@ struct berti_tri : public champsim::modules::prefetcher {
     uint64_t get(champsim::block_number addr);
     uint64_t del(champsim::block_number addr);
     uint64_t get_tag(champsim::block_number addr);
+    bool contains_page(champsim::page_number page);
   };
 
   class ShadowCache

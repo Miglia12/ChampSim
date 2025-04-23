@@ -95,6 +95,8 @@ namespace berti_tri_params
 // Bandwidth control parameters
 #define DRAM_WARM_MAX_FRACTION (0.5) // Maximum fraction of PQ bandwidth to use
 
+#define LATENCY_FACTOR_VALUE (0.2) // Reduce berti latency factor
+
 } // namespace berti_tri_params
 
 #endif /* _BERTI_TRI_PARAMETERS_H_ */

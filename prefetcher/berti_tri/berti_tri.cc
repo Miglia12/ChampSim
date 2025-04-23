@@ -179,6 +179,15 @@ uint64_t berti_tri::LatencyTable::get_tag(champsim::block_number addr)
   return 0;
 }
 
+bool berti_tri::LatencyTable::contains_page(champsim::page_number page)
+{
+  for (int i = 0; i < size; ++i) {
+    if (champsim::page_number{latencyt[i].addr} == page)
+      return true;
+  }
+  return false;
+}
+
 /******************************************************************************/
 /*                       Shadow Cache functions                               */
 /******************************************************************************/
@@ -906,73 +915,54 @@ void berti_tri::initialize_berti_table(uint64_t table_size)
 
 void berti_tri::get_dram_open_candidates(uint64_t tag, champsim::block_number base_addr, uint32_t metadata)
 {
-  /*
-   * Similar to the original get() method, but only applies confidence-based filtering
-   * and sends candidates to the scheduler
-   *
-   * Parameters:
-   *  - tag: PC tag
-   *  - base_addr: base address to prefetch from
-   *  - metadata: prefetch metadata
-   */
-
-  if constexpr (champsim::debug_print) {
-    std::cout << "[BERTI_TRI] " << __func__ << " tag: " << std::hex << tag;
-    std::cout << " base_addr: " << base_addr << std::dec << std::endl;
-  }
-
   if (!bertit.count(tag)) {
     if constexpr (champsim::debug_print)
-      std::cout << " TAG NOT FOUND" << std::endl;
+      std::cout << "[BERTI_TRI] TAG NOT FOUND\n";
     return;
   }
 
   uint64_t current_cycle = get_current_cycle();
-
-  // We found the tag
   berti* entry = bertit[tag];
 
-  // Create a vector to store deltas for DRAM warming
+  // Gather valid deltas
   std::vector<Delta> dram_open_deltas;
-
-  // Collect deltas with confidence within the configured range
-  for (auto& i : entry->deltas) {
-    if (i.delta != 0 && i.conf >= DRAM_WARM_MIN_CONF && i.conf <= DRAM_WARM_MAX_CONF) {
-      Delta new_delta;
-      new_delta.delta = i.delta;
-      new_delta.conf = i.conf;
-      new_delta.rpl = i.rpl;
-      dram_open_deltas.push_back(new_delta);
-    }
+  for (auto& d : entry->deltas) {
+    if (d.delta == 0 || d.conf < DRAM_WARM_MIN_CONF || d.conf > DRAM_WARM_MAX_CONF)
+      continue;
+    dram_open_deltas.push_back(d);
   }
 
-  std::sort(std::begin(dram_open_deltas), std::end(dram_open_deltas), compare_greater_delta);
+  // Sort by confidence
+  std::sort(dram_open_deltas.begin(), dram_open_deltas.end(), compare_greater_delta);
 
-  // Now issue prefetches for each identified delta
-  for (auto& i : dram_open_deltas) {
-    // Calculate prefetch address
-    champsim::block_number pf_block_addr = base_addr + i.delta;
+  // Issue DRAM-open for each delta
+  for (auto& d : dram_open_deltas) {
+    champsim::block_number pf_block_addr = base_addr + d.delta;
     champsim::address pf_addr{pf_block_addr};
 
-    // Skip if address is invalid
+    // Skip invalid
     if (pf_addr.to<uint64_t>() == 0)
       continue;
-
-    // Skip if address is already in the latency table (already being fetched)
-    if (latencyt->get(pf_block_addr))
+    // Skip if in L1D
+    if (scache->get(pf_block_addr))
+      continue;
+    // Skip if page in-flight
+    if (latencyt->contains_page(champsim::page_number{pf_addr}))
       continue;
 
-    // Create and add request to scheduler
-    dram_open::DramRowOpenRequest row_req(pf_addr, i.conf, metadata);
+    // Compute delay from average latency
+    uint64_t ready_delay = 0;
+    if (average_latency.num > 0)
+      ready_delay = static_cast<uint64_t>(std::ceil(average_latency.average * LATENCY_FACTOR));
 
-    // Add to scheduler - no page boundary check
-    if (row_scheduler->add_request(row_req, current_cycle)) {
-      dram_warm_requests++;
+    // Enqueue row-open
+    dram_open::DramRowOpenRequest row_req{pf_addr, d.conf, metadata};
+    if (row_scheduler->add_request(row_req, current_cycle, ready_delay)) {
+      ++dram_warm_requests;
     }
 
     if constexpr (champsim::debug_print) {
-      std::cout << "[BERTI_TRI] " << __func__ << " added to scheduler: addr=" << pf_addr;
-      std::cout << " delta=" << i.delta << " conf=" << i.conf << " rpl=" << +i.rpl << std::endl;
+      std::cout << "[BERTI_TRI] scheduled warm: addr=" << pf_addr << " delta=" << d.delta << " conf=" << d.conf << " delay=" << ready_delay << std::endl;
     }
   }
 }
@@ -1142,7 +1132,7 @@ uint32_t berti_tri::prefetcher_cache_operate(champsim::address addr, champsim::a
     if (latencyt->get(pf_block_addr))
       continue;
     if (i.rpl == BERTI_R)
-      return metadata_in;
+      continue;
     if (pf_addr.to<uint64_t>() == 0)
       continue;
 

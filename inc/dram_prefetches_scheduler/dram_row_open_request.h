@@ -20,7 +20,10 @@ struct DramRowOpenRequest {
   metadata_t metadata_in = 0;
 
   DramRowOpenRequest() = default;
-  DramRowOpenRequest(champsim::address a, confidence_t conf = 0, metadata_t meta_data = 0) : addr(a), confidence(conf), metadata_in(meta_data) {}
+  DramRowOpenRequest(champsim::address a, confidence_t conf = 0, metadata_t meta_data = 0)
+      : addr(a), confidence(conf), metadata_in(meta_data)
+  {
+  }
 };
 
 /**
@@ -29,10 +32,11 @@ struct DramRowOpenRequest {
 struct TimedEntry {
   DramRowOpenRequest request{};
   cycle_t inserted_at{};
+  cycle_t issue_latency{};
 
   TimedEntry() = default;
 
-  TimedEntry(const DramRowOpenRequest& req, cycle_t time) : request(req), inserted_at(time) {}
+  TimedEntry(const DramRowOpenRequest& req, cycle_t time, cycle_t latency) : request(req), inserted_at(time), issue_latency(latency) {}
 
   bool operator==(const TimedEntry& other) const
   {

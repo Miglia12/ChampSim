@@ -12,13 +12,14 @@ namespace dram_open
  * Statistics collected by the DRAM row open scheduler
  */
 struct SchedulerStats {
-  uint64_t REQUESTS_ADDED = 0;      // Number of requests successfully added
-  uint64_t DUPLICATES_DETECTED = 0; // Number of duplicate requests detected
-  uint64_t CONFIDENCE_UPDATES = 0;  // Number of confidence updates for duplicates
-  uint64_t DROPPED_FULL_QUEUE = 0;  // Number of requests dropped due to full queue
-  uint64_t PRUNED_EXPIRED = 0;      // Number of requests pruned due to expiration
-  uint64_t ISSUED_SUCCESS = 0;      // Number of requests successfully issued
-  uint64_t ISSUE_FAILURES = 0;      // Number of requests that failed to issue
+  uint64_t REQUESTS_ADDED = 0;            // Number of requests successfully added
+  uint64_t DUPLICATES_DETECTED = 0;       // Number of duplicate requests detected
+  uint64_t CONFIDENCE_UPDATES = 0;        // Number of confidence updates for duplicates
+  uint64_t DYNAMIC_THRESHOLD_UPDATES = 0; // Number of dynamic threshold updates
+  uint64_t DROPPED_FULL_QUEUE = 0; // Number of requests dropped due to full queue
+  uint64_t PRUNED_EXPIRED = 0;     // Number of requests pruned due to expiration
+  uint64_t ISSUED_SUCCESS = 0;     // Number of requests successfully issued
+  uint64_t ISSUE_FAILURES = 0;     // Number of requests that failed to issue
 
   /**
    * Reset all counters to zero
@@ -28,6 +29,7 @@ struct SchedulerStats {
     REQUESTS_ADDED = 0;
     DUPLICATES_DETECTED = 0;
     CONFIDENCE_UPDATES = 0;
+    DYNAMIC_THRESHOLD_UPDATES = 0;
     DROPPED_FULL_QUEUE = 0;
     PRUNED_EXPIRED = 0;
     ISSUED_SUCCESS = 0;
@@ -37,13 +39,18 @@ struct SchedulerStats {
   /**
    * Print statistics in a formatted way
    */
-  void print(std::string_view name = "DramRowOpenScheduler") const
+  void print(std::string_view name, uint64_t default_threshold, uint64_t dynamic_threshold) const
   {
     const uint64_t TOTAL_INPUT_REQUESTS = REQUESTS_ADDED + DUPLICATES_DETECTED;
     const uint64_t TOTAL_ATTEMPTED_ISSUES = ISSUED_SUCCESS + ISSUE_FAILURES;
 
     std::cout << '\n';
     std::cout << "===== " << name << " Stats =====\n\n";
+
+    std::cout << "Thresholds:\n";
+    std::cout << std::left << std::setw(40) << "  Default threshold:" << std::right << std::setw(12) << default_threshold << " cycles\n";
+    std::cout << std::left << std::setw(40) << "  Dynamic max threshold:" << std::right << std::setw(12) << dynamic_threshold;
+    std::cout << '\n';
 
     std::cout << "Request Lifecycle:\n";
     std::cout << std::left << std::setw(40) << "  Total input requests (adds + dupes):" << std::right << std::setw(12) << TOTAL_INPUT_REQUESTS << '\n';
@@ -66,6 +73,9 @@ struct SchedulerStats {
     std::cout << std::left << std::setw(40) << "  Duplicates detected:" << std::right << std::setw(12) << DUPLICATES_DETECTED << '\n';
     std::cout << std::left << std::setw(40) << "    └─ Confidence updated:" << std::right << std::setw(12) << CONFIDENCE_UPDATES << '\n';
 
+    std::cout << "\nDynamic Threshold:\n";
+    std::cout << std::left << std::setw(40) << "  Threshold updates:" << std::right << std::setw(12) << DYNAMIC_THRESHOLD_UPDATES << '\n';
+
     std::cout << "\nIssuance Attempts:\n";
     std::cout << std::left << std::setw(40) << "  Total attempted issues:" << std::right << std::setw(12) << TOTAL_ATTEMPTED_ISSUES << '\n';
     std::cout << std::left << std::setw(40) << "    ├─ Successful:" << std::right << std::setw(12) << ISSUED_SUCCESS << '\n';
@@ -78,6 +88,7 @@ struct SchedulerStats {
 
     std::cout << std::string(55, '=') << '\n';
   }
+
 };
 
 } // namespace dram_open
