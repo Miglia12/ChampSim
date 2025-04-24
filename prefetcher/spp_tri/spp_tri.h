@@ -1,11 +1,14 @@
 #ifndef SPP_TRI_H
 #define SPP_TRI_H
 
-#include <array>
 #include <cstdint>
+#include <iomanip>
+#include <memory>
 #include <vector>
 
 #include "cache.h"
+#include "dram_prefetches_scheduler/dram_row_open_request.h"
+#include "dram_prefetches_scheduler/dram_row_open_scheduler.h"
 #include "modules.h"
 #include "msl/lru_table.h"
 
@@ -18,8 +21,11 @@ struct spp_tri : public champsim::modules::prefetcher {
   constexpr static bool SPP_SANITY_CHECK = true;
   constexpr static bool SPP_DEBUG_PRINT = false;
 
-  // Confidence tracking feature
-  constexpr static bool CONFIDENCE_TRACKING = false;
+  // Enable "one more guess" with DRAM_ROW_OPEN
+  constexpr static uint32_t DRAM_OPEN_THRESHOLD = 15;
+  constexpr static uint32_t SCHEDULER_QUEUE_SIZE = 128;
+  constexpr static uint32_t READY_THRESHOLD = 15;
+  constexpr static uint32_t SLACK = 2;
 
   // Signature table parameters
   constexpr static std::size_t ST_SET = 1;
@@ -51,14 +57,6 @@ struct spp_tri : public champsim::modules::prefetcher {
   constexpr static uint32_t GLOBAL_COUNTER_MAX = ((1 << GLOBAL_COUNTER_BIT) - 1);
   constexpr static std::size_t MAX_GHR_ENTRY = 8;
 
-  // SPP-Tri: Counter for special DRAM prefetches
-  uint64_t special_dram_pf_issued;
-
-  // Confidence tracking arrays
-  constexpr static int MAX_CONFIDENCE = 100;
-  std::array<uint64_t, MAX_CONFIDENCE + 1> confidence_counters;
-  std::array<uint64_t, MAX_CONFIDENCE + 1> dram_confidence_counters;
-
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in);
@@ -68,8 +66,8 @@ struct spp_tri : public champsim::modules::prefetcher {
   void prefetcher_cycle_operate();
   void prefetcher_final_stats();
 
-  // SPP-Tri: New method to issue low-confidence DRAM prefetches
-  void issue_dram_prefetches(uint32_t curr_sig, champsim::address base_addr, uint32_t metadata_in);
+  // NEW: Helper function for "one more guess" with DRAM_ROW_OPEN
+  void try_one_more_guess(uint32_t curr_sig, champsim::address base_addr, uint32_t metadata_in);
 
   enum FILTER_REQUEST { SPP_L2C_PREFETCH, SPP_LLC_PREFETCH, L2C_DEMAND, L2C_EVICT }; // Request type for prefetch filter
   static uint64_t get_hash(uint64_t key);
@@ -128,7 +126,7 @@ struct spp_tri : public champsim::modules::prefetcher {
     }
 
     void update_pattern(uint32_t last_sig, typename offset_type::difference_type curr_delta);
-    void read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& delta_q, std::vector<uint32_t>& confidence_q,
+    void read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& prefetch_delta, std::vector<uint32_t>& confidence_q,
                       uint32_t& lookahead_way, uint32_t& lookahead_conf, uint32_t& pf_q_tail, uint32_t& depth);
   };
 
@@ -189,6 +187,20 @@ struct spp_tri : public champsim::modules::prefetcher {
   PATTERN_TABLE PT;
   PREFETCH_FILTER FILTER;
   GLOBAL_REGISTER GHR;
+
+  // DRAM row open scheduler for low-confidence prefetches
+  std::unique_ptr<dram_open::DramRowOpenScheduler> row_scheduler;
+
+private:
+  // Helper methods for scheduler integration
+  uint64_t get_current_cycle() { return static_cast<uint64_t>(intern_->current_time.time_since_epoch() / intern_->clock_period); }
+
+  std::size_t get_available_pq_slots()
+  {
+    auto pq_sizes = intern_->get_pq_size();
+    auto pq_occupancies = intern_->get_pq_occupancy();
+    return pq_sizes.back() - pq_occupancies.back();
+  }
 };
 
-#endif
+#endif // SPP_TRI_H

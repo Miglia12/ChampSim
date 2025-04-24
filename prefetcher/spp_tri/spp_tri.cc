@@ -1,79 +1,61 @@
 #include "spp_tri.h"
 
-#include <algorithm>
 #include <cassert>
-#include <iomanip>
 #include <iostream>
 
 void spp_tri::prefetcher_initialize()
 {
-  std::cout << "Initialize SIGNATURE TABLE" << std::endl;
-  std::cout << "ST_SET: " << ST_SET << std::endl;
-  std::cout << "ST_WAY: " << ST_WAY << std::endl;
-  std::cout << "ST_TAG_BIT: " << ST_TAG_BIT << std::endl;
+  // Initialize the DRAM row scheduler
+  row_scheduler = std::make_unique<dram_open::DramRowOpenScheduler>(SCHEDULER_QUEUE_SIZE, READY_THRESHOLD, SLACK);
 
-  std::cout << std::endl << "Initialize PATTERN TABLE" << std::endl;
-  std::cout << "PT_SET: " << PT_SET << std::endl;
-  std::cout << "PT_WAY: " << PT_WAY << std::endl;
-  std::cout << "SIG_DELTA_BIT: " << SIG_DELTA_BIT << std::endl;
-  std::cout << "C_SIG_BIT: " << C_SIG_BIT << std::endl;
-  std::cout << "C_DELTA_BIT: " << C_DELTA_BIT << std::endl;
-
-  std::cout << std::endl << "Initialize PREFETCH FILTER" << std::endl;
-  std::cout << "FILTER_SET: " << FILTER_SET << std::endl;
-
-  // Initialize the SPP-Tri special DRAM prefetch counter
-  special_dram_pf_issued = 0;
-
-  // Initialize confidence tracking if enabled
-  if constexpr (CONFIDENCE_TRACKING) {
-    confidence_counters.fill(0);
-    dram_confidence_counters.fill(0);
-  }
-
-  // pass pointers
+  // Set parent pointers
   ST._parent = this;
   PT._parent = this;
   FILTER._parent = this;
   GHR._parent = this;
+
+  std::cout << "\nInitializing SPP-TRI Prefetcher with DRAM Row Opening\n";
+  std::cout << "SIGNATURE TABLE Configuration:\n";
+  std::cout << "  ST_SET: " << ST_SET << "\n";
+  std::cout << "  ST_WAY: " << ST_WAY << "\n";
+  std::cout << "  ST_TAG_BIT: " << ST_TAG_BIT << "\n";
+
+  std::cout << "\nPATTERN TABLE Configuration:\n";
+  std::cout << "  PT_SET: " << PT_SET << "\n";
+  std::cout << "  PT_WAY: " << PT_WAY << "\n";
+  std::cout << "  SIG_DELTA_BIT: " << SIG_DELTA_BIT << "\n";
+  std::cout << "  C_SIG_BIT: " << C_SIG_BIT << "\n";
+  std::cout << "  C_DELTA_BIT: " << C_DELTA_BIT << "\n";
+
+  std::cout << "\nPREFETCH FILTER Configuration:\n";
+  std::cout << "  FILTER_SET: " << FILTER_SET << "\n";
+  std::cout << "  FILL_THRESHOLD: " << FILL_THRESHOLD << "\n";
+  std::cout << "  PF_THRESHOLD: " << PF_THRESHOLD << "\n";
+
+  std::cout << "\nDRAM ROW OPENING Configuration:\n";
+  std::cout << "  SCHEDULER_QUEUE_SIZE: " << SCHEDULER_QUEUE_SIZE << "\n";
+  std::cout << "  READY_THRESHOLD: " << READY_THRESHOLD << "\n";
+  std::cout << "  SLACK: " << SLACK << "\n";
+  std::cout << "  DRAM_OPEN_THRESHOLD: " << DRAM_OPEN_THRESHOLD << "\n";
 }
 
-void spp_tri::prefetcher_cycle_operate() {}
-
-void spp_tri::issue_dram_prefetches(uint32_t curr_sig, champsim::address base_addr, uint32_t metadata_in)
+void spp_tri::prefetcher_cycle_operate()
 {
-  uint32_t set = get_hash(curr_sig) % PT_SET;
+  // Get current cycle
+  uint64_t current_cycle = get_current_cycle();
 
-  // Only process if there are any signatures in this set
-  if (PT.c_sig[set]) {
-    for (uint32_t way = 0; way < PT_WAY; way++) {
-      // Calculate confidence for this pattern
-      uint32_t local_conf = (100 * PT.c_delta[set][way]) / PT.c_sig[set];
+  // Calculate how many prefetches we can issue this cycle
+  std::size_t available_pq_slots = get_available_pq_slots();
+  std::size_t max_issue_per_cycle = std::max(size_t{1}, static_cast<std::size_t>(static_cast<double>(available_pq_slots) * 0.8));
 
-      // Check if this is a low-confidence pattern (above 0 but below threshold)
-      if (local_conf > 0 && local_conf < PF_THRESHOLD) {
-        // Calculate prefetch address using the delta
-        champsim::address pf_addr{champsim::block_number{base_addr} + PT.delta[set][way]};
+  // Create a callback for issuing row open requests
+  auto issue_callback = [this](const dram_open::DramRowOpenRequest& req) -> bool {
+    // Use the special prefetch_line with open_dram_row=true
+    return this->prefetch_line(req.addr, false, req.metadata_in, true);
+  };
 
-        // Issue the DRAM prefetch - we don't check page boundaries here
-        if (prefetch_line(pf_addr, false, metadata_in, true)) {
-          special_dram_pf_issued++;
-
-          // Track confidence level if enabled
-          if constexpr (CONFIDENCE_TRACKING) {
-            // Make sure we don't exceed array bounds
-            uint32_t capped_conf = std::min(local_conf, static_cast<uint32_t>(MAX_CONFIDENCE));
-            dram_confidence_counters[capped_conf]++;
-          }
-
-          if constexpr (SPP_DEBUG_PRINT) {
-            std::cout << "[ChampSim] SPP-Tri DRAM prefetch issued: " << pf_addr;
-            std::cout << " confidence: " << local_conf << " delta: " << PT.delta[set][way] << std::endl;
-          }
-        }
-      }
-    }
-  }
+  // Process scheduler
+  row_scheduler->tick(current_cycle, max_issue_per_cycle, issue_callback);
 }
 
 uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
@@ -115,8 +97,9 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
   uint32_t lookahead_conf = 100, pf_q_head = 0, pf_q_tail = 0;
   uint8_t do_lookahead = 0;
 
-  // SPP-Tri: Issue low-confidence DRAM prefetches from current signature
-  issue_dram_prefetches(curr_sig, base_addr, metadata_in);
+  // Get current cycle for scheduler
+  uint64_t current_cycle = get_current_cycle();
+  uint32_t last_set;
 
   do {
     uint32_t lookahead_way = PT_WAY;
@@ -124,19 +107,11 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
 
     do_lookahead = 0;
     for (uint32_t i = pf_q_head; i < pf_q_tail; i++) {
-      // Original SPP prefetching logic for high-confidence entries
       if (confidence_q[i] >= PF_THRESHOLD) {
         champsim::address pf_addr{champsim::block_number{base_addr} + delta_q[i]};
 
         if (champsim::page_number{pf_addr} == page) { // Prefetch request is in the same physical page
           if (FILTER.check(pf_addr, ((confidence_q[i] >= FILL_THRESHOLD) ? spp_tri::SPP_L2C_PREFETCH : spp_tri::SPP_LLC_PREFETCH))) {
-            // Track confidence level if enabled
-            if constexpr (CONFIDENCE_TRACKING) {
-              // Make sure we don't exceed array bounds
-              uint32_t capped_conf = std::min(confidence_q[i], static_cast<uint32_t>(MAX_CONFIDENCE));
-              confidence_counters[capped_conf]++;
-            }
-
             prefetch_line(pf_addr, (confidence_q[i] >= FILL_THRESHOLD), 0); // Use addr (not base_addr) to obey the same physical page boundary
 
             if (confidence_q[i] >= FILL_THRESHOLD) {
@@ -157,6 +132,10 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
             }
           }
         } else { // Prefetch request is crossing the physical page boundary
+          // Collect page-crossing prefetches for DRAM row opening
+          dram_open::DramRowOpenRequest row_req(pf_addr, confidence_q[i], metadata_in);
+          // Add to the scheduler
+          row_scheduler->add_request(row_req, current_cycle);
           if constexpr (GHR_ON) {
             // Store this prefetch request in GHR to bootstrap SPP learning when
             // we see a ST miss (i.e., accessing a new page)
@@ -172,15 +151,16 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
     // Update base_addr and curr_sig
     if (lookahead_way < PT_WAY) {
       uint32_t set = get_hash(curr_sig) % PT_SET;
+      last_set = set;
       base_addr += (PT.delta[set][lookahead_way] << LOG2_BLOCK_SIZE);
 
       // PT.delta uses a 7-bit sign magnitude representation to generate
       // sig_delta
+      // int sig_delta = (PT.delta[set][lookahead_way] < 0) ? ((((-1) *
+      // PT.delta[set][lookahead_way]) & 0x3F) + 0x40) :
+      // PT.delta[set][lookahead_way];
       auto sig_delta = (PT.delta[set][lookahead_way] < 0) ? (((-1) * PT.delta[set][lookahead_way]) + (1 << (SIG_DELTA_BIT - 1))) : PT.delta[set][lookahead_way];
       curr_sig = ((curr_sig << SIG_SHIFT) ^ sig_delta) & SIG_MASK;
-
-      // SPP-Tri: Issue low-confidence DRAM prefetches for the lookahead signature too
-      issue_dram_prefetches(curr_sig, base_addr, metadata_in);
     }
 
     if constexpr (SPP_DEBUG_PRINT) {
@@ -188,6 +168,50 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
       std::cout << " pf_q_head: " << pf_q_head << " pf_q_tail: " << pf_q_tail << " depth: " << depth << std::endl;
     }
   } while (LOOKAHEAD_ON && do_lookahead);
+  // One more try!
+  // std::cout << "[SPP] Entering One More Try block" << std::endl;
+
+  // // Get the pattern table set for this signature
+  // uint32_t set = last_set;
+
+  // // Only check if the set has any valid entries
+  // if (PT.c_sig[set] == 0) {
+  //   std::cout << "[SPP] No valid entries in the pattern table set: " << last_set << std::endl;
+  //   return 0;
+  // }
+
+  // // Find the best low confidence pattern (below PF_THRESHOLD but above DRAM_OPEN_THRESHOLD)
+  // uint32_t best_way = PT_WAY;
+  // uint32_t best_conf = 0;
+
+  // for (uint32_t way = 0; way < PT_WAY; way++) {
+  //   uint32_t local_conf = (100 * PT.c_delta[set][way]) / PT.c_sig[set];
+
+  //   // Check if confidence is in our target range
+  //   if (local_conf >= DRAM_OPEN_THRESHOLD && local_conf < PF_THRESHOLD) {
+  //     // Found a pattern with confidence in our target range
+  //     if (local_conf > best_conf) {
+  //       best_way = way;
+  //       best_conf = local_conf;
+  //     }
+  //   }
+  // }
+
+  // If we found a pattern in our target range, issue a DRAM_ROW_OPEN request
+  // if (best_way < PT_WAY) {
+  //   // Calculate the prefetch address
+  //   champsim::address pf_addr{champsim::block_number{base_addr} + PT.delta[set][best_way]};
+
+  //   dram_open::DramRowOpenRequest row_req(pf_addr, best_conf);
+
+  //   // Add to the scheduler
+  //   row_scheduler->add_request(row_req, current_cycle, metadata_in);
+
+  //   std::cout << "[SPP] One More Guess: DRAM_ROW_OPEN issued for " << pf_addr;
+  //   std::cout << " delta: " << PT.delta[set][best_way] << " confidence: " << best_conf << std::endl;
+  // } else {
+  //   std::cout << "[SPP] No suitable pattern found in the target confidence range for set: " << set << std::endl;
+  // }
 
   return metadata_in;
 }
@@ -206,40 +230,8 @@ uint32_t spp_tri::prefetcher_cache_fill(champsim::address addr, long set, long w
 
 void spp_tri::prefetcher_final_stats()
 {
-  std::cout << "SPP-Tri special DRAM prefetches issued: " << special_dram_pf_issued << std::endl;
-
-  // Print confidence statistics if tracking is enabled
-  if constexpr (CONFIDENCE_TRACKING) {
-    std::cout << "\nSPP-Tri Confidence Statistics:" << std::endl;
-    std::cout << "====================================" << std::endl;
-
-    // Regular prefetches
-    std::cout << "\nRegular Prefetches by Confidence Level:" << std::endl;
-    std::cout << "--------------------------------------" << std::endl;
-    uint64_t total_regular_pf = 0;
-    for (int i = PF_THRESHOLD; i <= MAX_CONFIDENCE; i++) {
-      if (confidence_counters[i] > 0) {
-        std::cout << "Confidence " << std::setw(3) << i << ": " << std::setw(10) << confidence_counters[i] << " prefetches" << std::endl;
-        total_regular_pf += confidence_counters[i];
-      }
-    }
-    std::cout << "Total regular prefetches: " << total_regular_pf << std::endl;
-
-    // DRAM prefetches
-    std::cout << "\nDRAM Prefetches by Confidence Level:" << std::endl;
-    std::cout << "-----------------------------------" << std::endl;
-    uint64_t total_dram_pf = 0;
-    for (int i = 1; i < PF_THRESHOLD; i++) {
-      if (dram_confidence_counters[i] > 0) {
-        std::cout << "Confidence " << std::setw(3) << i << ": " << std::setw(10) << dram_confidence_counters[i] << " DRAM prefetches" << std::endl;
-        total_dram_pf += dram_confidence_counters[i];
-      }
-    }
-    std::cout << "Total DRAM prefetches: " << total_dram_pf << std::endl;
-
-    // Print summary of all prefetches
-    std::cout << "\nTotal prefetches issued: " << (total_regular_pf + total_dram_pf) << std::endl;
-  }
+  // Print scheduler stats
+  row_scheduler->print_stats("SPP-TRI DRAM Row Scheduler");
 }
 
 // TODO: Find a good 64-bit hash function
@@ -283,6 +275,7 @@ void spp_tri::SIGNATURE_TABLE::read_and_update_sig(champsim::address addr, uint3
 
         if (delta) {
           // Build a new sig based on 7-bit sign magnitude representation of delta
+          // sig_delta = (delta < 0) ? ((((-1) * delta) & 0x3F) + 0x40) : delta;
           sig_delta = (delta < 0) ? (((-1) * delta) + (1 << (SIG_DELTA_BIT - 1))) : delta;
           sig[set][match] = ((last_sig << SIG_SHIFT) ^ sig_delta) & SIG_MASK;
           curr_sig = sig[set][match];
@@ -612,10 +605,13 @@ void spp_tri::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
   }
 
   for (uint32_t i = 0; i < MAX_GHR_ENTRY; i++) {
+    // if (sig[i] == pf_sig) { // TODO: Which one is better and consistent?
+    //  If GHR already holds the same pf_sig, update the GHR entry with the latest info
     if (valid[i] && (offset[i] == pf_offset)) {
       // If GHR already holds the same pf_offset, update the GHR entry with the latest info
       sig[i] = pf_sig;
       confidence[i] = pf_confidence;
+      // offset[i] = pf_offset;
       delta[i] = pf_delta;
 
       if constexpr (SPP_DEBUG_PRINT) {
