@@ -23,7 +23,7 @@ struct spp_tri : public champsim::modules::prefetcher {
 
   // Enable "one more guess" with DRAM_ROW_OPEN
   constexpr static uint32_t DRAM_OPEN_THRESHOLD = 15;
-  constexpr static uint32_t SCHEDULER_QUEUE_SIZE = 128;
+  constexpr static uint32_t SCHEDULER_QUEUE_SIZE = 64;
   constexpr static uint32_t READY_THRESHOLD = 15;
   constexpr static uint32_t SLACK = 2;
 
@@ -65,9 +65,6 @@ struct spp_tri : public champsim::modules::prefetcher {
   void prefetcher_initialize();
   void prefetcher_cycle_operate();
   void prefetcher_final_stats();
-
-  // NEW: Helper function for "one more guess" with DRAM_ROW_OPEN
-  void try_one_more_guess(uint32_t curr_sig, champsim::address base_addr, uint32_t metadata_in);
 
   enum FILTER_REQUEST { SPP_L2C_PREFETCH, SPP_LLC_PREFETCH, L2C_DEMAND, L2C_EVICT }; // Request type for prefetch filter
   static uint64_t get_hash(uint64_t key);

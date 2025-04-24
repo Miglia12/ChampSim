@@ -46,7 +46,7 @@ void spp_tri::prefetcher_cycle_operate()
 
   // Calculate how many prefetches we can issue this cycle
   std::size_t available_pq_slots = get_available_pq_slots();
-  std::size_t max_issue_per_cycle = std::max(size_t{1}, static_cast<std::size_t>(static_cast<double>(available_pq_slots) * 0.8));
+  std::size_t max_issue_per_cycle = std::max(size_t{1}, static_cast<std::size_t>(static_cast<double>(available_pq_slots) * 0.5));
 
   // Create a callback for issuing row open requests
   auto issue_callback = [this](const dram_open::DramRowOpenRequest& req) -> bool {
@@ -63,10 +63,10 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
 {
   champsim::page_number page{addr};
   uint32_t last_sig = 0, curr_sig = 0, depth = 0;
-  std::vector<uint32_t> confidence_q(intern_->MSHR_SIZE);
+  std::vector<uint32_t> confidence_q(intern_->MSHR_SIZE * 2);
 
   typename spp_tri::offset_type::difference_type delta = 0;
-  std::vector<typename spp_tri::offset_type::difference_type> delta_q(intern_->MSHR_SIZE);
+  std::vector<typename spp_tri::offset_type::difference_type> delta_q(intern_->MSHR_SIZE * 2);
 
   for (uint32_t i = 0; i < intern_->MSHR_SIZE; i++) {
     confidence_q[i] = 0;
@@ -99,7 +99,6 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
 
   // Get current cycle for scheduler
   uint64_t current_cycle = get_current_cycle();
-  uint32_t last_set;
 
   do {
     uint32_t lookahead_way = PT_WAY;
@@ -145,13 +144,16 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
 
         do_lookahead = 1;
         pf_q_head++;
+      } else if (confidence_q[i] >= DRAM_OPEN_THRESHOLD && confidence_q[i] < PF_THRESHOLD) {
+        champsim::address pf_addr{champsim::block_number{base_addr} + delta_q[i]};
+        dram_open::DramRowOpenRequest row_req(pf_addr, confidence_q[i], metadata_in);
+        row_scheduler->add_request(row_req, current_cycle);
       }
     }
 
     // Update base_addr and curr_sig
     if (lookahead_way < PT_WAY) {
       uint32_t set = get_hash(curr_sig) % PT_SET;
-      last_set = set;
       base_addr += (PT.delta[set][lookahead_way] << LOG2_BLOCK_SIZE);
 
       // PT.delta uses a 7-bit sign magnitude representation to generate
@@ -168,50 +170,6 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
       std::cout << " pf_q_head: " << pf_q_head << " pf_q_tail: " << pf_q_tail << " depth: " << depth << std::endl;
     }
   } while (LOOKAHEAD_ON && do_lookahead);
-  // One more try!
-  // std::cout << "[SPP] Entering One More Try block" << std::endl;
-
-  // // Get the pattern table set for this signature
-  // uint32_t set = last_set;
-
-  // // Only check if the set has any valid entries
-  // if (PT.c_sig[set] == 0) {
-  //   std::cout << "[SPP] No valid entries in the pattern table set: " << last_set << std::endl;
-  //   return 0;
-  // }
-
-  // // Find the best low confidence pattern (below PF_THRESHOLD but above DRAM_OPEN_THRESHOLD)
-  // uint32_t best_way = PT_WAY;
-  // uint32_t best_conf = 0;
-
-  // for (uint32_t way = 0; way < PT_WAY; way++) {
-  //   uint32_t local_conf = (100 * PT.c_delta[set][way]) / PT.c_sig[set];
-
-  //   // Check if confidence is in our target range
-  //   if (local_conf >= DRAM_OPEN_THRESHOLD && local_conf < PF_THRESHOLD) {
-  //     // Found a pattern with confidence in our target range
-  //     if (local_conf > best_conf) {
-  //       best_way = way;
-  //       best_conf = local_conf;
-  //     }
-  //   }
-  // }
-
-  // If we found a pattern in our target range, issue a DRAM_ROW_OPEN request
-  // if (best_way < PT_WAY) {
-  //   // Calculate the prefetch address
-  //   champsim::address pf_addr{champsim::block_number{base_addr} + PT.delta[set][best_way]};
-
-  //   dram_open::DramRowOpenRequest row_req(pf_addr, best_conf);
-
-  //   // Add to the scheduler
-  //   row_scheduler->add_request(row_req, current_cycle, metadata_in);
-
-  //   std::cout << "[SPP] One More Guess: DRAM_ROW_OPEN issued for " << pf_addr;
-  //   std::cout << " delta: " << PT.delta[set][best_way] << " confidence: " << best_conf << std::endl;
-  // } else {
-  //   std::cout << "[SPP] No suitable pattern found in the target confidence range for set: " << set << std::endl;
-  // }
 
   return metadata_in;
 }
@@ -463,25 +421,36 @@ void spp_tri::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typenam
       local_conf = (100 * c_delta[set][way]) / c_sig[set];
       pf_conf = depth ? (_parent->GHR.global_accuracy * c_delta[set][way] / c_sig[set] * lookahead_conf / 100) : local_conf;
 
-      if (pf_conf >= PF_THRESHOLD) {
+      // Include patterns with confidence >= DRAM_OPEN_THRESHOLD
+      if (pf_conf >= _parent->DRAM_OPEN_THRESHOLD) {
         confidence_q[pf_q_tail] = pf_conf;
         delta_q[pf_q_tail] = delta[set][way];
 
-        // Lookahead path follows the most confident entry
-        if (pf_conf > max_conf) {
+        // Lookahead path still only follows high confidence patterns
+        if (pf_conf > max_conf && pf_conf >= _parent->PF_THRESHOLD) {
           lookahead_way = way;
           max_conf = pf_conf;
         }
         pf_q_tail++;
 
         if constexpr (SPP_DEBUG_PRINT) {
-          std::cout << "[PT] " << __func__ << " HIGH CONF: " << pf_conf << " sig: " << std::hex << curr_sig << std::dec << " set: " << set << " way: " << way;
+          std::string conf_level;
+          if (pf_conf >= _parent->FILL_THRESHOLD)
+            conf_level = "HIGH";
+          else if (pf_conf >= _parent->PF_THRESHOLD)
+            conf_level = "MEDIUM";
+          else
+            conf_level = "LOW";
+
+          std::cout << "[PT] " << __func__ << " " << conf_level << " CONF: " << pf_conf << " sig: " << std::hex << curr_sig << std::dec << " set: " << set
+                    << " way: " << way;
           std::cout << " delta: " << delta[set][way] << " c_delta: " << c_delta[set][way] << " c_sig: " << c_sig[set];
           std::cout << " conf: " << local_conf << " depth: " << depth << std::endl;
         }
       } else {
         if constexpr (SPP_DEBUG_PRINT) {
-          std::cout << "[PT] " << __func__ << "  LOW CONF: " << pf_conf << " sig: " << std::hex << curr_sig << std::dec << " set: " << set << " way: " << way;
+          std::cout << "[PT] " << __func__ << "  VERY LOW CONF: " << pf_conf << " sig: " << std::hex << curr_sig << std::dec << " set: " << set
+                    << " way: " << way;
           std::cout << " delta: " << delta[set][way] << " c_delta: " << c_delta[set][way] << " c_sig: " << c_sig[set];
           std::cout << " conf: " << local_conf << " depth: " << depth << std::endl;
         }
@@ -490,7 +459,7 @@ void spp_tri::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typenam
     pf_q_tail++;
 
     lookahead_conf = max_conf;
-    if (lookahead_conf >= PF_THRESHOLD)
+    if (lookahead_conf >= _parent->PF_THRESHOLD)
       depth++;
 
     if constexpr (SPP_DEBUG_PRINT) {
