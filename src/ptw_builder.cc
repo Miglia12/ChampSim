@@ -15,7 +15,7 @@
  */
 
 #include "ptw_builder.h"
-
+#include "cache.h"
 #include <cmath>
 #include <utility>
 
@@ -94,6 +94,8 @@ auto champsim::ptw_builder::lower_level(champsim::channel* ll_) -> ptw_builder&
 auto champsim::ptw_builder::virtual_memory(VirtualMemory* vmem_) -> ptw_builder&
 {
   m_vmem = vmem_;
+  CACHE::initialize_vmem(m_vmem);
+  printf("[VMEM] Setting static pointer to %p\n", static_cast<void*>(this));
   return *this;
 }
 

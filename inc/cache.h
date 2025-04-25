@@ -46,6 +46,7 @@
 #include "operable.h"
 #include "util/to_underlying.h" // for to_underlying
 #include "waitable.h"
+#include "vmem.h"
 
 class CACHE : public champsim::operable
 {
@@ -219,8 +220,10 @@ public:
 
   void print_deadlock() final;
 
-  // Static pointer to the LLC
   static CACHE* llc_static;
+  static VirtualMemory* vmem_static;
+
+  static void initialize_vmem(VirtualMemory* vmem_ptr) { vmem_static = vmem_ptr; }
 
 #include "module_decl.inc"
 

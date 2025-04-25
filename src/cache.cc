@@ -33,6 +33,7 @@
 #include "util/span.h"
 
 CACHE* CACHE::llc_static = nullptr;
+VirtualMemory* CACHE::vmem_static = nullptr;
 
 CACHE::CACHE(CACHE&& other)
     : operable(other),
@@ -580,8 +581,23 @@ long CACHE::invalidate_entry(champsim::address inval_addr)
 bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata, bool open_dram_row)
 {
   // If we want to open a DRAM row and we're not already the LLC
-  if (open_dram_row && NAME != "LLC" && llc_static) {
-    return llc_static->prefetch_line(pf_addr, false, prefetch_metadata, true);
+  if (open_dram_row && NAME != "LLC" && llc_static != nullptr) {
+
+    champsim::address physical_addr = pf_addr;
+    // If we have a virtual prefetch perform on the spot translation
+    if (virtual_prefetch && vmem_static != nullptr) {
+      // Extract page number and offset
+      champsim::page_number vpage = champsim::page_number{pf_addr};
+      champsim::page_offset offset = champsim::page_offset{pf_addr};
+
+      // Translate page number to physical page
+      auto [ppage, penalty] = vmem_static->va_to_pa(cpu, vpage);
+
+      // Combine to form full physical address
+      physical_addr = champsim::address{champsim::splice(ppage, offset)};
+    }
+
+    return llc_static->prefetch_line(physical_addr, false, prefetch_metadata, true);
   }
 
   ++sim_stats.pf_requested;
