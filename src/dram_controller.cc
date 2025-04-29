@@ -349,6 +349,7 @@ DRAM_CHANNEL::queue_type::iterator DRAM_CHANNEL::schedule_packet()
   // Look for queued packets that have not been scheduled
   // prioritize packets that are ready to execute, bank is free
   auto next_schedule = [this](const auto& lhs, const auto& rhs) {
+    // Skip invalid or already scheduled requests
     if (!(rhs.has_value() && !rhs.value().scheduled)) {
       return true;
     }
@@ -356,12 +357,35 @@ DRAM_CHANNEL::queue_type::iterator DRAM_CHANNEL::schedule_packet()
       return false;
     }
 
+    // Get bank indices and rows
     auto lop_idx = this->bank_request_index(lhs.value().address);
     auto rop_idx = this->bank_request_index(rhs.value().address);
-    auto rready = !this->bank_request[rop_idx].valid;
-    auto lready = !this->bank_request[lop_idx].valid;
-    return (rready == lready) ? lhs.value().ready_time <= rhs.value().ready_time : lready;
+
+    // Check bank readiness
+    bool lready = !this->bank_request[lop_idx].valid && !this->bank_request[lop_idx].under_refresh;
+    bool rready = !this->bank_request[rop_idx].valid && !this->bank_request[rop_idx].under_refresh;
+
+    // If bank readiness differs, that's our first priority
+    if (lready != rready)
+      return lready;
+
+    // For ready banks, check for row buffer hits
+    if (lready && rready) {
+      auto lop_row = this->address_mapping.get_row(lhs.value().address);
+      auto rop_row = this->address_mapping.get_row(rhs.value().address);
+
+      bool lhit = this->bank_request[lop_idx].open_row.has_value() && *(this->bank_request[lop_idx].open_row) == lop_row;
+      bool rhit = this->bank_request[rop_idx].open_row.has_value() && *(this->bank_request[rop_idx].open_row) == rop_row;
+
+      // Prioritize row buffer hits
+      if (lhit != rhit)
+        return lhit;
+    }
+
+    // If all else is equal, use arrival time
+    return lhs.value().ready_time <= rhs.value().ready_time;
   };
+  
   queue_type::iterator iter_next_schedule;
   if (write_mode) {
     iter_next_schedule = std::min_element(std::begin(WQ), std::end(WQ), next_schedule);
