@@ -34,7 +34,14 @@
 #include "extent_set.h"
 #include "operable.h"
 
-constexpr bool DRAM_ROW_OPEN_PAYS_TCAS = false; // Set to true if speculative opens should pay tCAS
+// Set to true if speculative opens should pay tCAS
+constexpr bool DRAM_ROW_OPEN_PAYS_TCAS = false; 
+
+// Enables perfect speculative opening mode
+constexpr bool perfect_speculative_opening = false;
+
+// Controls whether the DRAM controller considers potential row-buffer hits for scheduling
+constexpr bool use_row_buffer_aware_controller = true;
 
 struct DRAM_ADDRESS_MAPPING {
   constexpr static std::size_t SLICER_OFFSET_IDX = 0;
