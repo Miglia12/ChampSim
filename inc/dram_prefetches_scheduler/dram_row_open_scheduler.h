@@ -8,6 +8,7 @@
 #include "dram_row_open_request.h"
 #include "dram_row_open_stats.h"
 
+
 namespace dram_open
 {
 
@@ -19,7 +20,7 @@ class DramRowOpenScheduler
 {
 public:
   DramRowOpenScheduler(size_t max_size_param, cycle_t default_ready_delay = 0, cycle_t slack_cycles = 0)
-      : m_max_size(max_size_param), m_default_ready_threshold(default_ready_delay), m_dynamic_threshold(0), m_slack(slack_cycles)
+      : m_max_size(max_size_param), m_default_ready_threshold(default_ready_delay), m_slack(slack_cycles)
   {
   }
 
@@ -33,26 +34,8 @@ public:
 
   bool add_request(const DramRowOpenRequest& req, cycle_t now, cycle_t ready_delay = 0)
   {
-    // Stage 1: Adding
-
     // Determine effective latency for this request
-    cycle_t effective_latency;
-    if (ready_delay > 0) {
-      // If delay is provided, use it
-      effective_latency = ready_delay;
-
-      // Update dynamic threshold if delay is higher than default
-      if (ready_delay > m_default_ready_threshold) {
-        m_dynamic_threshold = ready_delay;
-        m_stats.DYNAMIC_THRESHOLD_UPDATES++;
-      }
-    } else if (m_dynamic_threshold > m_default_ready_threshold) {
-      // If no delay provided and dynamic threshold is higher than default, use dynamic
-      effective_latency = m_dynamic_threshold;
-    } else {
-      // Otherwise use default threshold
-      effective_latency = m_default_ready_threshold;
-    }
+    cycle_t effective_latency = (ready_delay > 0) ? ready_delay : m_default_ready_threshold;
 
     // Create timed entry with effective latency
     TimedEntry new_entry(req, now, effective_latency);
@@ -92,25 +75,23 @@ public:
   [[nodiscard]] size_t size() const { return m_queue.size(); }
   [[nodiscard]] size_t capacity() const { return m_max_size; }
   [[nodiscard]] cycle_t get_default_threshold() const { return m_default_ready_threshold; }
-  [[nodiscard]] cycle_t get_dynamic_threshold() const { return m_dynamic_threshold; }
 
   void clear() { m_queue.clear(); }
   void reset_stats() { m_stats.reset(); }
   [[nodiscard]] const SchedulerStats& get_stats() const { return m_stats; }
 
-  void print_stats(std::string_view name = "DramRowOpenScheduler") const { m_stats.print(name, m_default_ready_threshold, m_dynamic_threshold); }
+  void print_stats(std::string_view name = "DramRowOpenScheduler") const { m_stats.print(name, m_default_ready_threshold); }
 
 private:
   size_t m_max_size;
-  cycle_t m_default_ready_threshold; // Base default value set in constructor
-  cycle_t m_dynamic_threshold;       // Dynamically updated threshold
+  cycle_t m_default_ready_threshold;
   cycle_t m_slack;
   std::vector<TimedEntry> m_queue;
   SchedulerStats m_stats;
 
   void prune_expired_requests(cycle_t now)
   {
-    // Stage 2: Pruning
+    // Stage 1: Pruning - same as before
     auto deadline_passed = [now, this](const auto& entry) {
       return now > (entry.inserted_at + entry.issue_latency + m_slack);
     };

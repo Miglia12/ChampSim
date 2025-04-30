@@ -83,17 +83,12 @@ namespace berti_tri_params
  *****************************************************************************/
 
 // DRAM row scheduler configuration
-#define DRAM_SCHEDULER_QUEUE_SIZE (64)     // Maximum number of requests in scheduler
 #define DRAM_SCHEDULER_READY_THRESHOLD (25) // Cycles before a request is considered ready
-#define DRAM_SCHEDULER_SLACK (3)          // Additional cycles before pruning
 
 // Fine-grained confidence levels for DRAM warming (inclusive)
 // Note: These can be any values between 0 and CONFIDENCE_MAX (16)
 #define DRAM_WARM_MIN_CONFIDENCE (5) // Minimum confidence for DRAM warming
 #define DRAM_WARM_MAX_CONFIDENCE (6) // Maximum confidence for DRAM warming
-
-// Bandwidth control parameters
-#define DRAM_WARM_MAX_FRACTION (0.5) // Maximum fraction of PQ bandwidth to use
 
 #define LATENCY_FACTOR_VALUE (0.2) // Reduce berti latency factor
 

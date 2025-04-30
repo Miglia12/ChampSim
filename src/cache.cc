@@ -519,6 +519,10 @@ long CACHE::operate()
   inflight_tag_check.erase(tag_check_ready_begin, finish_tag_check_end);
 
   impl_prefetcher_cycle_operate();
+  
+  if (NAME == "LLC" && row_open_scheduler) {
+    process_row_open_scheduler();
+  }
 
   if constexpr (champsim::debug_print) {
     fmt::print("[{}] {} cycle completed: {} tags checked: {} remaining: {} stash consumed: {} remaining: {} channel consumed: {} pq consumed {} unused consume "
@@ -576,6 +580,56 @@ long CACHE::invalidate_entry(champsim::address inval_addr)
   }
 
   return std::distance(begin, inv_way);
+}
+
+void CACHE::process_row_open_scheduler()
+{
+  // Only process in LLC
+  if (NAME == "LLC" && row_open_scheduler) {
+    uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
+
+    // Calculate how many prefetches we can issue this cycle
+    // Similar to the logic in next_line_ff::prefetcher_cycle_operate
+    std::size_t available_pq_slots = PQ_SIZE - std::size(internal_PQ);
+    std::size_t max_issue_per_cycle = std::max(size_t{1}, static_cast<std::size_t>(available_pq_slots * DRAM_ROW_SCHEDULER_ISSUE_RATE));
+
+    // Create callback for issuing row open requests
+    auto issue_callback = [this](const dram_open::DramRowOpenRequest& req) -> bool {
+      return this->prefetch_line(req.addr, false, req.metadata_in, true);
+    };
+
+    // Process scheduler - identical to original code
+    row_open_scheduler->tick(current_cycle, max_issue_per_cycle, issue_callback);
+  }
+}
+
+bool CACHE::submit_dram_row_open(champsim::address addr, uint32_t confidence, uint32_t metadata, uint64_t ready_delay)
+{
+  // If not LLC, forward to LLC
+  if (NAME != "LLC" && llc_static != nullptr) {
+    // Handle virtual-to-physical translation if needed
+    champsim::address physical_addr = addr;
+    if (virtual_prefetch && vmem_static != nullptr) {
+      champsim::page_number vpage = champsim::page_number{addr};
+      champsim::page_offset offset = champsim::page_offset{addr};
+      auto [ppage, penalty] = vmem_static->va_to_pa(cpu, vpage);
+      physical_addr = champsim::address{champsim::splice(ppage, offset)};
+    }
+
+    // Forward to LLC
+    return llc_static->submit_dram_row_open(physical_addr, confidence, metadata, ready_delay);
+  }
+
+  // If this is LLC, handle the submission
+  if (row_open_scheduler) {
+    uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
+
+    // Create and add the request
+    dram_open::DramRowOpenRequest row_req(addr, confidence, metadata);
+    return row_open_scheduler->add_request(row_req, current_cycle, ready_delay);
+  }
+
+  return false;
 }
 
 bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata, bool open_dram_row)
@@ -873,8 +927,17 @@ void CACHE::initialize()
 
   // If this is the LLC, set the static pointer
   if (NAME == "LLC") {
+
     fmt::print("[{}] Setting LLC static pointer to {}\n", NAME, static_cast<void*>(this));
     llc_static = this;
+
+    row_open_scheduler =
+        std::make_unique<dram_open::DramRowOpenScheduler>(DRAM_ROW_SCHEDULER_QUEUE_SIZE, DRAM_ROW_SCHEDULER_READY_THRESHOLD, DRAM_ROW_SCHEDULER_SLACK);
+
+    fmt::print("Initializing LLC DRAM Row Open Scheduler:\n");
+    fmt::print("  - Queue Size: {}\n", DRAM_ROW_SCHEDULER_QUEUE_SIZE);
+    fmt::print("  - Ready Threshold: {} cycles\n", DRAM_ROW_SCHEDULER_READY_THRESHOLD);
+    fmt::print("  - Slack: {} cycles\n", DRAM_ROW_SCHEDULER_SLACK);
   }
 }
 
@@ -895,6 +958,9 @@ void CACHE::begin_phase()
     ul->roi_stats = ul_new_roi_stats;
     ul->sim_stats = ul_new_sim_stats;
   }
+
+  if (row_open_scheduler)
+    row_open_scheduler->reset_stats();
 }
 
 void CACHE::end_phase(unsigned finished_cpu)
@@ -929,6 +995,10 @@ void CACHE::end_phase(unsigned finished_cpu)
     ul->roi_stats.WQ_FULL = ul->sim_stats.WQ_FULL;
     ul->roi_stats.WQ_TO_CACHE = ul->sim_stats.WQ_TO_CACHE;
     ul->roi_stats.WQ_FORWARD = ul->sim_stats.WQ_FORWARD;
+  }
+
+  if (NAME == "LLC" && row_open_scheduler && cpu == 0 && !warmup) {
+    row_open_scheduler->print_stats("LLC DRAM Row Open Scheduler");
   }
 }
 

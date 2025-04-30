@@ -23,6 +23,12 @@ bool champsim::modules::prefetcher::prefetch_line(champsim::address pf_addr, boo
   return intern_->prefetch_line(pf_addr, fill_this_level, prefetch_metadata, prefetch_from_llc);
 }
 
+bool champsim::modules::prefetcher::submit_dram_row_open(champsim::address addr, uint32_t confidence, uint32_t metadata, uint64_t ready_delay) const
+{
+
+  return intern_->submit_dram_row_open(addr, confidence, metadata, ready_delay);
+}
+
 // LCOV_EXCL_START Exclude deprecated function
 bool champsim::modules::prefetcher::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata) const
 {

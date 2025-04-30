@@ -7,8 +7,6 @@
 #include <vector>
 
 #include "cache.h"
-#include "dram_prefetches_scheduler/dram_row_open_request.h"
-#include "dram_prefetches_scheduler/dram_row_open_scheduler.h"
 #include "modules.h"
 #include "msl/lru_table.h"
 
@@ -23,9 +21,7 @@ struct spp_tri : public champsim::modules::prefetcher {
 
   // Enable "one more guess" with DRAM_ROW_OPEN
   constexpr static uint32_t DRAM_OPEN_THRESHOLD = 15;
-  constexpr static uint32_t SCHEDULER_QUEUE_SIZE = 64;
   constexpr static uint32_t READY_THRESHOLD = 15;
-  constexpr static uint32_t SLACK = 2;
 
   // Signature table parameters
   constexpr static std::size_t ST_SET = 1;

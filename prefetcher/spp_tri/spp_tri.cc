@@ -5,9 +5,6 @@
 
 void spp_tri::prefetcher_initialize()
 {
-  // Initialize the DRAM row scheduler
-  row_scheduler = std::make_unique<dram_open::DramRowOpenScheduler>(SCHEDULER_QUEUE_SIZE, READY_THRESHOLD, SLACK);
-
   // Set parent pointers
   ST._parent = this;
   PT._parent = this;
@@ -33,30 +30,12 @@ void spp_tri::prefetcher_initialize()
   std::cout << "  PF_THRESHOLD: " << PF_THRESHOLD << "\n";
 
   std::cout << "\nDRAM ROW OPENING Configuration:\n";
-  std::cout << "  SCHEDULER_QUEUE_SIZE: " << SCHEDULER_QUEUE_SIZE << "\n";
   std::cout << "  READY_THRESHOLD: " << READY_THRESHOLD << "\n";
-  std::cout << "  SLACK: " << SLACK << "\n";
-  std::cout << "  DRAM_OPEN_THRESHOLD: " << DRAM_OPEN_THRESHOLD << "\n";
+
 }
 
 void spp_tri::prefetcher_cycle_operate()
-{
-  // Get current cycle
-  uint64_t current_cycle = get_current_cycle();
-
-  // Calculate how many prefetches we can issue this cycle
-  std::size_t available_pq_slots = get_available_pq_slots();
-  std::size_t max_issue_per_cycle = std::max(size_t{1}, static_cast<std::size_t>(static_cast<double>(available_pq_slots) * 0.5));
-
-  // Create a callback for issuing row open requests
-  auto issue_callback = [this](const dram_open::DramRowOpenRequest& req) -> bool {
-    // Use the special prefetch_line with open_dram_row=true
-    return this->prefetch_line(req.addr, false, req.metadata_in, true);
-  };
-
-  // Process scheduler
-  row_scheduler->tick(current_cycle, max_issue_per_cycle, issue_callback);
-}
+{}
 
 uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                            uint32_t metadata_in)
@@ -97,9 +76,6 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
   uint32_t lookahead_conf = 100, pf_q_head = 0, pf_q_tail = 0;
   uint8_t do_lookahead = 0;
 
-  // Get current cycle for scheduler
-  uint64_t current_cycle = get_current_cycle();
-
   do {
     uint32_t lookahead_way = PT_WAY;
     PT.read_pattern(curr_sig, delta_q, confidence_q, lookahead_way, lookahead_conf, pf_q_tail, depth);
@@ -132,9 +108,7 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
           }
         } else { // Prefetch request is crossing the physical page boundary
           // Collect page-crossing prefetches for DRAM row opening
-          dram_open::DramRowOpenRequest row_req(pf_addr, confidence_q[i], metadata_in);
-          // Add to the scheduler
-          row_scheduler->add_request(row_req, current_cycle);
+          submit_dram_row_open(pf_addr, confidence_q[i], metadata_in, READY_THRESHOLD);
           if constexpr (GHR_ON) {
             // Store this prefetch request in GHR to bootstrap SPP learning when
             // we see a ST miss (i.e., accessing a new page)
@@ -146,8 +120,7 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
         pf_q_head++;
       } else if (confidence_q[i] >= DRAM_OPEN_THRESHOLD && confidence_q[i] < PF_THRESHOLD) {
         champsim::address pf_addr{champsim::block_number{base_addr} + delta_q[i]};
-        dram_open::DramRowOpenRequest row_req(pf_addr, confidence_q[i], metadata_in);
-        row_scheduler->add_request(row_req, current_cycle);
+        submit_dram_row_open(pf_addr, confidence_q[i], metadata_in, READY_THRESHOLD);
       }
     }
 
@@ -187,10 +160,7 @@ uint32_t spp_tri::prefetcher_cache_fill(champsim::address addr, long set, long w
 }
 
 void spp_tri::prefetcher_final_stats()
-{
-  // Print scheduler stats
-  row_scheduler->print_stats("SPP-TRI DRAM Row Scheduler");
-}
+{}
 
 // TODO: Find a good 64-bit hash function
 uint64_t spp_tri::get_hash(uint64_t key)

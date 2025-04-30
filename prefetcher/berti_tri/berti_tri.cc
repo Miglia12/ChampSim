@@ -954,10 +954,8 @@ void berti_tri::get_dram_open_candidates(uint64_t tag, champsim::block_number ba
     uint64_t ready_delay = 0;
     if (average_latency.num > 0)
       ready_delay = static_cast<uint64_t>(std::ceil(average_latency.average * LATENCY_FACTOR));
-
     // Enqueue row-open
-    dram_open::DramRowOpenRequest row_req{pf_addr, d.conf, metadata};
-    if (row_scheduler->add_request(row_req, current_cycle, ready_delay)) {
+    if (submit_dram_row_open(pf_addr, d.conf, metadata, ready_delay)) {
       ++dram_warm_requests;
     }
 
@@ -990,16 +988,10 @@ void berti_tri::prefetcher_initialize()
   scache = std::make_unique<ShadowCache>(intern_->NUM_SET, intern_->NUM_WAY);
   historyt = std::make_unique<HistoryTable>();
 
-  // Initialize DRAM row warming scheduler
-  row_scheduler = std::make_unique<dram_open::DramRowOpenScheduler>(SCHEDULER_QUEUE_SIZE, READY_THRESHOLD, SLACK);
-
   std::cout << "Berti-Tri Prefetcher" << std::endl;
   std::cout << "DRAM Row Warming Configuration:" << std::endl;
-  std::cout << "  SCHEDULER_QUEUE_SIZE: " << SCHEDULER_QUEUE_SIZE << std::endl;
   std::cout << "  READY_THRESHOLD: " << READY_THRESHOLD << std::endl;
-  std::cout << "  SLACK: " << SLACK << std::endl;
   std::cout << "  Confidence selection: [" << DRAM_WARM_MIN_CONF << " - " << DRAM_WARM_MAX_CONF << "]" << std::endl;
-  std::cout << "  DRAM_WARM_BW_FRACTION: " << DRAM_WARM_BW_FRACTION << std::endl;
 
 #ifdef NO_CROSS_PAGE
   std::cout << "No Crossing Page (for regular prefetches)" << std::endl;
@@ -1053,26 +1045,7 @@ void berti_tri::prefetcher_initialize()
 }
 
 void berti_tri::prefetcher_cycle_operate()
-{
-  uint64_t current_cycle = get_current_cycle();
-
-  // Calculate how many prefetches we can issue this cycle
-  std::size_t available_pq_slots = intern_->PQ_SIZE - intern_->get_pq_occupancy().back();
-  std::size_t max_issue_per_cycle = std::max(size_t{1}, static_cast<std::size_t>(static_cast<double>(available_pq_slots) * DRAM_WARM_BW_FRACTION));
-
-  // Create a callback for issuing DRAM row warming requests
-  auto issue_callback = [this](const dram_open::DramRowOpenRequest& req) -> bool {
-    // Use the special prefetch_line with open_dram_row=true for DRAM row warming
-    bool success = this->prefetch_line(req.addr, false, req.metadata_in, true);
-    if (success) {
-      dram_row_warm_issued++;
-    }
-    return success;
-  };
-
-  // Process scheduler
-  row_scheduler->tick(current_cycle, max_issue_per_cycle, issue_callback);
-}
+{}
 
 uint32_t berti_tri::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in)
@@ -1255,6 +1228,4 @@ void berti_tri::prefetcher_final_stats()
   std::cout << " WARM_REQUESTS: " << dram_warm_requests;
   std::cout << " WARM_ISSUED: " << dram_row_warm_issued;
   std::cout << std::endl;
-
-  row_scheduler->print_stats("Berti-Tri DRAM Row Warming Scheduler");
 }

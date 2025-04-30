@@ -23,8 +23,6 @@
 
 #include "berti_tri_parameters.h"
 #include "cache.h"
-#include "dram_prefetches_scheduler/dram_row_open_request.h"
-#include "dram_prefetches_scheduler/dram_row_open_scheduler.h"
 #include "modules.h"
 
 using namespace berti_tri_params;
@@ -62,22 +60,15 @@ struct berti_tri : public champsim::modules::prefetcher {
    *****************************************************************************/
 
   // DRAM row warming scheduler configuration (from berti_tri_parameters.h)
-  static constexpr size_t SCHEDULER_QUEUE_SIZE = DRAM_SCHEDULER_QUEUE_SIZE;
   static constexpr uint64_t READY_THRESHOLD = DRAM_SCHEDULER_READY_THRESHOLD;
-  static constexpr uint64_t SLACK = DRAM_SCHEDULER_SLACK;
 
   // Fine-grained confidence selection (from berti_tri_parameters.h)
   uint64_t DRAM_WARM_MIN_CONF = DRAM_WARM_MIN_CONFIDENCE;
   uint64_t DRAM_WARM_MAX_CONF = DRAM_WARM_MAX_CONFIDENCE;
 
-  // Bandwidth control
-  double DRAM_WARM_BW_FRACTION = DRAM_WARM_MAX_FRACTION;
 
   // Reduce berti latency factor
   double LATENCY_FACTOR = LATENCY_FACTOR_VALUE;
-
-  // Scheduler instance
-  std::unique_ptr<dram_open::DramRowOpenScheduler> row_scheduler;
 
   /*****************************************************************************
    *                      General Structs                                      *

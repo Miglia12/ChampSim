@@ -42,11 +42,14 @@
 #include "champsim.h"
 #include "channel.h"
 #include "chrono.h"
+#include "dram_prefetches_scheduler/dram_row_open_scheduler.h"
+#include "dram_prefetches_scheduler/dram_row_open_request.h"
+#include "dram_prefetches_scheduler/dram_row_open_stats.h"
 #include "modules.h"
 #include "operable.h"
 #include "util/to_underlying.h" // for to_underlying
-#include "waitable.h"
 #include "vmem.h"
+#include "waitable.h"
 
 class CACHE : public champsim::operable
 {
@@ -122,6 +125,7 @@ private:
   void finish_translation(const response_type& packet);
 
   void issue_translation(tag_lookup_type& q_entry) const;
+  void process_row_open_scheduler();
 
 public:
   using BLOCK = champsim::cache_block;
@@ -224,6 +228,26 @@ public:
   static VirtualMemory* vmem_static;
 
   static void initialize_vmem(VirtualMemory* vmem_ptr) { vmem_static = vmem_ptr; }
+
+  // DRAM Row Open Scheduler Configuration
+  // Size of the scheduler's request queue
+  static constexpr size_t DRAM_ROW_SCHEDULER_QUEUE_SIZE = 126;
+
+  // Minimum cycles before a row open request is considered ready
+  // 0 means requests are immediately eligible for scheduling
+  static constexpr uint64_t DRAM_ROW_SCHEDULER_READY_THRESHOLD = 0;
+
+  // Additional time (in cycles) a request remains in the queue after becoming ready
+  // 0 means requests are pruned immediately if not issued when ready
+  static constexpr uint64_t DRAM_ROW_SCHEDULER_SLACK = 1;
+
+  // Maximum fraction of available PQ slots to use per cycle for row opens
+  static constexpr double DRAM_ROW_SCHEDULER_ISSUE_RATE = 0.5;
+  // The scheduler lives only in the LLC
+  std::unique_ptr<dram_open::DramRowOpenScheduler> row_open_scheduler;
+
+  // Non-static submission method (similar to prefetch_line)
+  bool submit_dram_row_open(champsim::address addr, uint32_t confidence, uint32_t metadata, uint64_t ready_delay = 0);
 
 #include "module_decl.inc"
 
