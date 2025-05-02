@@ -124,6 +124,23 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
         fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
   }
 
+  if (stats.name == "LLC" && stats.row_open_stats.REQUESTS_ADDED > 0) {
+    const uint64_t TOTAL_INPUT_REQUESTS = stats.row_open_stats.REQUESTS_ADDED + stats.row_open_stats.DUPLICATES_DETECTED;
+    const uint64_t TOTAL_ATTEMPTED_ISSUES = stats.row_open_stats.ISSUED_SUCCESS + stats.row_open_stats.ISSUE_FAILURES;
+
+    lines.push_back(fmt::format("{} DRAM ROW OPEN SCHEDULER REQUESTED: {:10} ADDED: {:10} DUPLICATES: {:10}", stats.name, TOTAL_INPUT_REQUESTS,
+                                stats.row_open_stats.REQUESTS_ADDED, stats.row_open_stats.DUPLICATES_DETECTED));
+    lines.push_back(fmt::format("  ISSUED: {:10} EXPIRED: {:10} FAILED: {:10}", stats.row_open_stats.ISSUED_SUCCESS, stats.row_open_stats.PRUNED_EXPIRED,
+                                stats.row_open_stats.ISSUE_FAILURES));
+    lines.push_back(fmt::format("  DROPPED (QUEUE FULL): {:10} CONFIDENCE UPDATES: {:10}", stats.row_open_stats.DROPPED_FULL_QUEUE,
+                                stats.row_open_stats.CONFIDENCE_UPDATES));
+
+    if (TOTAL_ATTEMPTED_ISSUES > 0) {
+      float issue_success_rate = 100.0f * static_cast<float>(stats.row_open_stats.ISSUED_SUCCESS) / static_cast<float>(TOTAL_ATTEMPTED_ISSUES);
+      lines.push_back(fmt::format("  ISSUE SUCCESS RATE: {:.2f}%", issue_success_rate));
+    }
+  }
+
   return lines;
 }
 

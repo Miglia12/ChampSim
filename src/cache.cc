@@ -998,7 +998,8 @@ void CACHE::end_phase(unsigned finished_cpu)
   }
 
   if (NAME == "LLC" && row_open_scheduler && cpu == 0 && !warmup) {
-    row_open_scheduler->print_stats("LLC DRAM Row Open Scheduler");
+
+    roi_stats.row_open_stats = row_open_scheduler->get_stats();
   }
 }
 

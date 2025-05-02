@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "channel.h"
+#include "dram_prefetches_scheduler/dram_row_open_stats.h"
 #include "event_counter.h"
 
 struct cache_stats {
@@ -24,6 +25,8 @@ struct cache_stats {
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> mshr_return = {};
 
   long total_miss_latency_cycles{};
+
+  dram_open::SchedulerStats row_open_stats;
 };
 
 cache_stats operator-(cache_stats lhs, cache_stats rhs);

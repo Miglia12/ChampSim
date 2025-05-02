@@ -71,6 +71,24 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
     statsmap.emplace(access_type_names.at(champsim::to_underlying(type)), nlohmann::json{{"hit", hits}, {"miss", misses}, {"mshr_merge", mshr_merges}});
   }
 
+  if (stats.name == "LLC" && stats.row_open_stats.REQUESTS_ADDED > 0) {
+    const uint64_t TOTAL_INPUT_REQUESTS = stats.row_open_stats.REQUESTS_ADDED + stats.row_open_stats.DUPLICATES_DETECTED;
+    const uint64_t TOTAL_ATTEMPTED_ISSUES = stats.row_open_stats.ISSUED_SUCCESS + stats.row_open_stats.ISSUE_FAILURES;
+
+    float issue_success_rate =
+        TOTAL_ATTEMPTED_ISSUES > 0 ? (100.0f * static_cast<float>(stats.row_open_stats.ISSUED_SUCCESS) / static_cast<float>(TOTAL_ATTEMPTED_ISSUES)) : 0.0f;
+
+    statsmap.emplace("ROW_OPEN_SCHEDULER", nlohmann::json{{"REQUESTS", TOTAL_INPUT_REQUESTS},
+                                                          {"ADDED", stats.row_open_stats.REQUESTS_ADDED},
+                                                          {"DUPLICATES", stats.row_open_stats.DUPLICATES_DETECTED},
+                                                          {"ISSUED", stats.row_open_stats.ISSUED_SUCCESS},
+                                                          {"EXPIRED", stats.row_open_stats.PRUNED_EXPIRED},
+                                                          {"FAILED", stats.row_open_stats.ISSUE_FAILURES},
+                                                          {"DROPPED_QUEUE_FULL", stats.row_open_stats.DROPPED_FULL_QUEUE},
+                                                          {"CONFIDENCE_UPDATES", stats.row_open_stats.CONFIDENCE_UPDATES},
+                                                          {"ISSUE_SUCCESS_RATE", issue_success_rate}});
+  }
+
   j = statsmap;
 }
 
