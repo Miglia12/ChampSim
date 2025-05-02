@@ -30,8 +30,7 @@ void spp_tri::prefetcher_initialize()
   std::cout << "  PF_THRESHOLD: " << PF_THRESHOLD << "\n";
 
   std::cout << "\nDRAM ROW OPENING Configuration:\n";
-  std::cout << "  READY_THRESHOLD: " << READY_THRESHOLD << "\n";
-
+  std::cout << "  RDRAM_OPEN_THRESHOLD: " << DRAM_OPEN_THRESHOLD << "\n";
 }
 
 void spp_tri::prefetcher_cycle_operate()
@@ -108,7 +107,7 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
           }
         } else { // Prefetch request is crossing the physical page boundary
           // Collect page-crossing prefetches for DRAM row opening
-          submit_dram_row_open(pf_addr, confidence_q[i], metadata_in, READY_THRESHOLD);
+          submit_dram_row_open(pf_addr, confidence_q[i], metadata_in);
           if constexpr (GHR_ON) {
             // Store this prefetch request in GHR to bootstrap SPP learning when
             // we see a ST miss (i.e., accessing a new page)
@@ -120,7 +119,7 @@ uint32_t spp_tri::prefetcher_cache_operate(champsim::address addr, champsim::add
         pf_q_head++;
       } else if (confidence_q[i] >= DRAM_OPEN_THRESHOLD && confidence_q[i] < PF_THRESHOLD) {
         champsim::address pf_addr{champsim::block_number{base_addr} + delta_q[i]};
-        submit_dram_row_open(pf_addr, confidence_q[i], metadata_in, READY_THRESHOLD);
+        submit_dram_row_open(pf_addr, confidence_q[i], metadata_in);
       }
     }
 

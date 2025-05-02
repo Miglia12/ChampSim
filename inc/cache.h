@@ -233,10 +233,6 @@ public:
   // Size of the scheduler's request queue
   static constexpr size_t DRAM_ROW_SCHEDULER_QUEUE_SIZE = 126;
 
-  // Minimum cycles before a row open request is considered ready
-  // 0 means requests are immediately eligible for scheduling
-  static constexpr uint64_t DRAM_ROW_SCHEDULER_READY_THRESHOLD = 0;
-
   // Additional time (in cycles) a request remains in the queue after becoming ready
   // 0 means requests are pruned immediately if not issued when ready
   static constexpr uint64_t DRAM_ROW_SCHEDULER_SLACK = 1;
@@ -248,6 +244,8 @@ public:
 
   // Non-static submission method (similar to prefetch_line)
   bool submit_dram_row_open(champsim::address addr, uint32_t confidence, uint32_t metadata, uint64_t ready_delay = 0);
+
+  [[nodiscard]] std::pair<bool, champsim::chrono::clock::duration> check_prefetch_redundancy(const champsim::address& addr) const;
 
 #include "module_decl.inc"
 

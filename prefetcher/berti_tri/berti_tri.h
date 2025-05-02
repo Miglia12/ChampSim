@@ -58,17 +58,9 @@ struct berti_tri : public champsim::modules::prefetcher {
   /*****************************************************************************
    *                      DRAM Row Warming Parameters                          *
    *****************************************************************************/
-
-  // DRAM row warming scheduler configuration (from berti_tri_parameters.h)
-  static constexpr uint64_t READY_THRESHOLD = DRAM_SCHEDULER_READY_THRESHOLD;
-
   // Fine-grained confidence selection (from berti_tri_parameters.h)
   uint64_t DRAM_WARM_MIN_CONF = DRAM_WARM_MIN_CONFIDENCE;
   uint64_t DRAM_WARM_MAX_CONF = DRAM_WARM_MAX_CONFIDENCE;
-
-
-  // Reduce berti latency factor
-  double LATENCY_FACTOR = LATENCY_FACTOR_VALUE;
 
   /*****************************************************************************
    *                      General Structs                                      *

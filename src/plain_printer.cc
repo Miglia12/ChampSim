@@ -135,6 +135,11 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
     lines.push_back(fmt::format("  DROPPED (QUEUE FULL): {:10} CONFIDENCE UPDATES: {:10}", stats.row_open_stats.DROPPED_FULL_QUEUE,
                                 stats.row_open_stats.CONFIDENCE_UPDATES));
 
+    if (stats.row_open_stats.ISSUED_SUCCESS > 0) {
+      const double AVG_DELAY = static_cast<double>(stats.row_open_stats.TOTAL_DELAY_CYCLES) / static_cast<double>(stats.row_open_stats.ISSUED_SUCCESS);
+      lines.push_back(fmt::format("  AVERAGE DELAY: {:.2f} cycles", AVG_DELAY));
+    }
+
     if (TOTAL_ATTEMPTED_ISSUES > 0) {
       float issue_success_rate = 100.0f * static_cast<float>(stats.row_open_stats.ISSUED_SUCCESS) / static_cast<float>(TOTAL_ATTEMPTED_ISSUES);
       lines.push_back(fmt::format("  ISSUE SUCCESS RATE: {:.2f}%", issue_success_rate));

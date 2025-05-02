@@ -950,17 +950,13 @@ void berti_tri::get_dram_open_candidates(uint64_t tag, champsim::block_number ba
     if (latencyt->contains_page(champsim::page_number{pf_addr}))
       continue;
 
-    // Compute delay from average latency
-    uint64_t ready_delay = 0;
-    if (average_latency.num > 0)
-      ready_delay = static_cast<uint64_t>(std::ceil(average_latency.average * LATENCY_FACTOR));
     // Enqueue row-open
-    if (submit_dram_row_open(pf_addr, d.conf, metadata, ready_delay)) {
+    if (submit_dram_row_open(pf_addr, d.conf, metadata)) {
       ++dram_warm_requests;
     }
 
     if constexpr (champsim::debug_print) {
-      std::cout << "[BERTI_TRI] scheduled warm: addr=" << pf_addr << " delta=" << d.delta << " conf=" << d.conf << " delay=" << ready_delay << std::endl;
+      std::cout << "[BERTI_TRI] scheduled warm: addr=" << pf_addr << " delta=" << d.delta << " conf=" << d.conf << std::endl;
     }
   }
 }
@@ -990,7 +986,6 @@ void berti_tri::prefetcher_initialize()
 
   std::cout << "Berti-Tri Prefetcher" << std::endl;
   std::cout << "DRAM Row Warming Configuration:" << std::endl;
-  std::cout << "  READY_THRESHOLD: " << READY_THRESHOLD << std::endl;
   std::cout << "  Confidence selection: [" << DRAM_WARM_MIN_CONF << " - " << DRAM_WARM_MAX_CONF << "]" << std::endl;
 
 #ifdef NO_CROSS_PAGE

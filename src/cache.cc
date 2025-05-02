@@ -353,8 +353,11 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
     *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
   } else {
-    if (mshr_full) { // not enough MSHR resource
-      return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
+    // Only check MSHR fullness if this isn't a prefetch that's skipping this level
+    bool bypass_mshr = (handle_pkt.type == access_type::PREFETCH && !mshr_pkt.second.response_requested);
+
+    if (mshr_full && !bypass_mshr) { // not enough MSHR resource
+      return false;
     }
 
     const bool send_to_rq = (prefetch_as_load && handle_pkt.type == access_type::PREFETCH)
@@ -582,6 +585,32 @@ long CACHE::invalidate_entry(champsim::address inval_addr)
   return std::distance(begin, inv_way);
 }
 
+std::pair<bool, champsim::chrono::clock::duration> CACHE::check_prefetch_redundancy(const champsim::address& addr) const
+{
+  // Latency cost of checking cache and MSHR is the tag check latency
+  champsim::chrono::clock::duration check_latency = this->HIT_LATENCY;
+
+  // Check if the address is already in the cache
+  auto [set_begin, set_end] = get_set_span(addr);
+  auto way = std::find_if(set_begin, set_end, [matcher = matches_address(addr)](const auto& x) { return x.valid && matcher(x); });
+
+  if (way != set_end) {
+    // Address found in cache
+    return {true, check_latency};
+  }
+
+  // Check if the address is in flight (in MSHR)
+  auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), [matcher = matches_address(addr)](const auto& x) { return matcher(x); });
+
+  if (mshr_entry != std::end(MSHR)) {
+    // Address is in flight
+    return {true, check_latency};
+  }
+
+  // Address not found in cache or MSHR
+  return {false, check_latency};
+}
+
 void CACHE::process_row_open_scheduler()
 {
   // Only process in LLC
@@ -609,15 +638,29 @@ bool CACHE::submit_dram_row_open(champsim::address addr, uint32_t confidence, ui
   if (NAME != "LLC" && llc_static != nullptr) {
     // Handle virtual-to-physical translation if needed
     champsim::address physical_addr = addr;
+    champsim::chrono::clock::duration translation_penalty{0};
+
     if (virtual_prefetch && vmem_static != nullptr) {
       champsim::page_number vpage = champsim::page_number{addr};
       champsim::page_offset offset = champsim::page_offset{addr};
       auto [ppage, penalty] = vmem_static->va_to_pa(cpu, vpage);
       physical_addr = champsim::address{champsim::splice(ppage, offset)};
+      translation_penalty = penalty;
     }
 
-    // Forward to LLC
-    return llc_static->submit_dram_row_open(physical_addr, confidence, metadata, ready_delay);
+    // Now check if this request would be redundant using the physical address
+    auto [is_redundant, check_latency] = check_prefetch_redundancy(physical_addr);
+
+    if (is_redundant) {
+      // Skip redundant requests to save bandwidth
+      return false;
+    }
+
+    // Calculate total delay: base delay + check latency + translation penalty
+    uint64_t total_delay = ready_delay + (check_latency.count() / clock_period.count()) + (translation_penalty.count() / clock_period.count());
+
+    // Forward to LLC with updated delay
+    return llc_static->submit_dram_row_open(physical_addr, confidence, metadata, total_delay);
   }
 
   // If this is LLC, handle the submission
@@ -932,11 +975,10 @@ void CACHE::initialize()
     llc_static = this;
 
     row_open_scheduler =
-        std::make_unique<dram_open::DramRowOpenScheduler>(DRAM_ROW_SCHEDULER_QUEUE_SIZE, DRAM_ROW_SCHEDULER_READY_THRESHOLD, DRAM_ROW_SCHEDULER_SLACK);
+        std::make_unique<dram_open::DramRowOpenScheduler>(DRAM_ROW_SCHEDULER_QUEUE_SIZE, DRAM_ROW_SCHEDULER_SLACK);
 
     fmt::print("Initializing LLC DRAM Row Open Scheduler:\n");
     fmt::print("  - Queue Size: {}\n", DRAM_ROW_SCHEDULER_QUEUE_SIZE);
-    fmt::print("  - Ready Threshold: {} cycles\n", DRAM_ROW_SCHEDULER_READY_THRESHOLD);
     fmt::print("  - Slack: {} cycles\n", DRAM_ROW_SCHEDULER_SLACK);
   }
 }
