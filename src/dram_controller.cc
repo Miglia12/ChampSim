@@ -27,6 +27,8 @@
 #include "util/span.h"
 #include "util/units.h"
 
+MEMORY_CONTROLLER* MEMORY_CONTROLLER::dram_controller_static = nullptr;
+
 MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd,
                                      std::size_t t_cas, std::size_t t_ras, champsim::chrono::microseconds refresh_period, std::vector<channel_type*>&& ul,
                                      std::size_t rq_size, std::size_t wq_size, std::size_t chans, champsim::data::bytes chan_width, std::size_t rows,
@@ -479,6 +481,9 @@ void MEMORY_CONTROLLER::initialize()
   }
   fmt::print(" Channels: {} Width: {}-bit Data Rate: {} MT/s\n", std::size(channels), champsim::data::bits_per_byte * channel_width.count(),
              1us / (data_bus_period));
+
+  fmt::print("[MEM] Setting static pointer to {}\n", static_cast<void*>(this));
+  dram_controller_static = this;
 
   fmt::print("DRAM Controller Configuration:\n");
   fmt::print("  - Perfect Speculative Opening: {}\n", perfect_speculative_opening ? "ENABLED" : "DISABLED");

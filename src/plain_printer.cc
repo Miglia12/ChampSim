@@ -132,8 +132,7 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
                                 stats.row_open_stats.REQUESTS_ADDED, stats.row_open_stats.DUPLICATES_DETECTED));
     lines.push_back(fmt::format("  ISSUED: {:10} EXPIRED: {:10} FAILED: {:10}", stats.row_open_stats.ISSUED_SUCCESS, stats.row_open_stats.PRUNED_EXPIRED,
                                 stats.row_open_stats.ISSUE_FAILURES));
-    lines.push_back(fmt::format("  DROPPED (QUEUE FULL): {:10} CONFIDENCE UPDATES: {:10}", stats.row_open_stats.DROPPED_FULL_QUEUE,
-                                stats.row_open_stats.CONFIDENCE_UPDATES));
+    lines.push_back(fmt::format("  DROPPED (QUEUE FULL): {:10}", stats.row_open_stats.DROPPED_FULL_QUEUE));
 
     if (stats.row_open_stats.ISSUED_SUCCESS > 0) {
       const double AVG_DELAY = static_cast<double>(stats.row_open_stats.TOTAL_DELAY_CYCLES) / static_cast<double>(stats.row_open_stats.ISSUED_SUCCESS);

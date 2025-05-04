@@ -14,7 +14,6 @@ namespace dram_open
 struct SchedulerStats {
   uint64_t REQUESTS_ADDED = 0;      // Number of requests successfully added
   uint64_t DUPLICATES_DETECTED = 0; // Number of duplicate requests detected
-  uint64_t CONFIDENCE_UPDATES = 0;  // Number of confidence updates for duplicates
   uint64_t DROPPED_FULL_QUEUE = 0;  // Number of requests dropped due to full queue
   uint64_t PRUNED_EXPIRED = 0;      // Number of requests pruned due to expiration
   uint64_t ISSUED_SUCCESS = 0;      // Number of requests successfully issued
@@ -25,7 +24,6 @@ struct SchedulerStats {
   {
     REQUESTS_ADDED = 0;
     DUPLICATES_DETECTED = 0;
-    CONFIDENCE_UPDATES = 0;
     DROPPED_FULL_QUEUE = 0;
     PRUNED_EXPIRED = 0;
     ISSUED_SUCCESS = 0;
@@ -61,10 +59,6 @@ struct SchedulerStats {
     std::cout << std::left << std::setw(40) << "  Still in queue:" << std::right << std::setw(12) << still_in_queue << "  (" << std::fixed
               << std::setprecision(2) << (REQUESTS_ADDED ? (100.0 * static_cast<double>(still_in_queue) / static_cast<double>(REQUESTS_ADDED)) : 0.0) << "%)\n";
 
-    std::cout << "\nDuplicates:\n";
-    std::cout << std::left << std::setw(40) << "  Duplicates detected:" << std::right << std::setw(12) << DUPLICATES_DETECTED << '\n';
-    std::cout << std::left << std::setw(40) << "    └─ Confidence updated:" << std::right << std::setw(12) << CONFIDENCE_UPDATES << '\n';
-
     std::cout << "\nIssuance Attempts:\n";
     std::cout << std::left << std::setw(40) << "  Total attempted issues:" << std::right << std::setw(12) << TOTAL_ATTEMPTED_ISSUES << '\n';
     std::cout << std::left << std::setw(40) << "    ├─ Successful:" << std::right << std::setw(12) << ISSUED_SUCCESS << '\n';
@@ -78,5 +72,4 @@ struct SchedulerStats {
     std::cout << std::string(55, '=') << '\n';
   }
 };
-
-} // namespace dram_open
+}

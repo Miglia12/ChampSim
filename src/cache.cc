@@ -31,6 +31,7 @@
 #include "util/algorithm.h"
 #include "util/bits.h"
 #include "util/span.h"
+#include "dram_controller.h"
 
 CACHE* CACHE::llc_static = nullptr;
 VirtualMemory* CACHE::vmem_static = nullptr;
@@ -354,7 +355,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
   } else {
     // Only check MSHR fullness if this isn't a prefetch that's skipping this level
-    bool bypass_mshr = (handle_pkt.type == access_type::PREFETCH && !mshr_pkt.second.response_requested);
+    bool bypass_mshr = ((handle_pkt.type == access_type::PREFETCH || handle_pkt.type ==  access_type::DRAM_ROW_OPEN) && !mshr_pkt.second.response_requested);
 
     if (mshr_full && !bypass_mshr) { // not enough MSHR resource
       return false;
@@ -618,16 +619,19 @@ void CACHE::process_row_open_scheduler()
     uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
 
     // Calculate how many prefetches we can issue this cycle
-    // Similar to the logic in next_line_ff::prefetcher_cycle_operate
     std::size_t available_pq_slots = PQ_SIZE - std::size(internal_PQ);
-    std::size_t max_issue_per_cycle = std::max(size_t{1}, static_cast<std::size_t>(available_pq_slots * DRAM_ROW_SCHEDULER_ISSUE_RATE));
 
+    double rate = static_cast<double>(dram_open::SCHEDULER_ISSUE_RATE);
+    double slots_to_use = static_cast<double>(available_pq_slots) * rate;
+
+    std::size_t max_issue_per_cycle = std::max(std::size_t{1}, static_cast<std::size_t>(slots_to_use));
+    
     // Create callback for issuing row open requests
     auto issue_callback = [this](const dram_open::DramRowOpenRequest& req) -> bool {
-      return this->prefetch_line(req.addr, false, req.metadata_in, true);
+      return this->prefetch_line(req.addr, false, req.metadata, true);
     };
 
-    // Process scheduler - identical to original code
+    // Process scheduler
     row_open_scheduler->tick(current_cycle, max_issue_per_cycle, issue_callback);
   }
 }
@@ -652,24 +656,24 @@ bool CACHE::submit_dram_row_open(champsim::address addr, uint32_t confidence, ui
     auto [is_redundant, check_latency] = check_prefetch_redundancy(physical_addr);
 
     if (is_redundant) {
-      // Skip redundant requests to save bandwidth
+      // Skip redundant requests
       return false;
     }
 
     // Calculate total delay: base delay + check latency + translation penalty
     uint64_t total_delay = ready_delay + (check_latency.count() / clock_period.count()) + (translation_penalty.count() / clock_period.count());
 
-    // Forward to LLC with updated delay
+        // Forward to LLC with updated delay
     return llc_static->submit_dram_row_open(physical_addr, confidence, metadata, total_delay);
   }
 
-  // If this is LLC, handle the submission
   if (row_open_scheduler) {
     uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
 
     // Create and add the request
-    dram_open::DramRowOpenRequest row_req(addr, confidence, metadata);
-    return row_open_scheduler->add_request(row_req, current_cycle, ready_delay);
+    dram_open::DramRowOpenRequest req(addr, confidence, metadata);
+
+    return row_open_scheduler->add_request(req, current_cycle, ready_delay);
   }
 
   return false;
@@ -968,18 +972,23 @@ void CACHE::initialize()
   impl_prefetcher_initialize();
   impl_initialize_replacement();
 
-  // If this is the LLC, set the static pointer
+  // If this is the LLC, set the static pointer and initialize the scheduler
   if (NAME == "LLC") {
-
-    fmt::print("[{}] Setting LLC static pointer to {}\n", NAME, static_cast<void*>(this));
     llc_static = this;
+    
+    row_open_scheduler = std::make_unique<dram_open::DramRowOpenScheduler>(dram_open::SCHEDULER_QUEUE_SIZE,   // Queue size
+                                                                           dram_open::SCHEDULER_SLACK_CYCLES, // Slack cycles
+                                                                           dram_open::DENSITY_WEIGHT,         // Density weight
+                                                                           dram_open::CONFIDENCE_WEIGHT,      // Confidence weight
+                                                                           dram_open::MAX_CONFIDENCE,         // Max confidence value
+                                                                           dram_open::ROW_BUFFER_SIZE         // Row buffer size
+    );
 
-    row_open_scheduler =
-        std::make_unique<dram_open::DramRowOpenScheduler>(DRAM_ROW_SCHEDULER_QUEUE_SIZE, DRAM_ROW_SCHEDULER_SLACK);
-
-    fmt::print("Initializing LLC DRAM Row Open Scheduler:\n");
-    fmt::print("  - Queue Size: {}\n", DRAM_ROW_SCHEDULER_QUEUE_SIZE);
-    fmt::print("  - Slack: {} cycles\n", DRAM_ROW_SCHEDULER_SLACK);
+    fmt::print("Initialized LLC DRAM Row Open Scheduler:\n");
+    fmt::print("  - Queue Size: {}\n", dram_open::SCHEDULER_QUEUE_SIZE);
+    fmt::print("  - Slack: {} cycles\n", dram_open::SCHEDULER_SLACK_CYCLES);
+    fmt::print("  - Max Issue Rate: {:.1f}%\n", dram_open::SCHEDULER_ISSUE_RATE * 100.0);
+    fmt::print("  - Density/Confidence Weights: {:.1f}/{:.1f}\n", dram_open::DENSITY_WEIGHT * 100.0, dram_open::CONFIDENCE_WEIGHT * 100.0);
   }
 }
 

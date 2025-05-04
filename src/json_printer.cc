@@ -85,7 +85,6 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
                                                           {"EXPIRED", stats.row_open_stats.PRUNED_EXPIRED},
                                                           {"FAILED", stats.row_open_stats.ISSUE_FAILURES},
                                                           {"DROPPED_QUEUE_FULL", stats.row_open_stats.DROPPED_FULL_QUEUE},
-                                                          {"CONFIDENCE_UPDATES", stats.row_open_stats.CONFIDENCE_UPDATES},
                                                           {"ISSUE_SUCCESS_RATE", issue_success_rate}});
   }
 

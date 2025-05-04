@@ -42,9 +42,9 @@
 #include "champsim.h"
 #include "channel.h"
 #include "chrono.h"
+#include "dram_prefetches_scheduler/dram_row_open_data_structures.h"
 #include "dram_prefetches_scheduler/dram_row_open_scheduler.h"
-#include "dram_prefetches_scheduler/dram_row_open_request.h"
-#include "dram_prefetches_scheduler/dram_row_open_stats.h"
+#include "dram_prefetches_scheduler/dram_row_open_parameters.h"
 #include "modules.h"
 #include "operable.h"
 #include "util/to_underlying.h" // for to_underlying
@@ -229,16 +229,6 @@ public:
 
   static void initialize_vmem(VirtualMemory* vmem_ptr) { vmem_static = vmem_ptr; }
 
-  // DRAM Row Open Scheduler Configuration
-  // Size of the scheduler's request queue
-  static constexpr size_t DRAM_ROW_SCHEDULER_QUEUE_SIZE = 126;
-
-  // Additional time (in cycles) a request remains in the queue after becoming ready
-  // 0 means requests are pruned immediately if not issued when ready
-  static constexpr uint64_t DRAM_ROW_SCHEDULER_SLACK = 1;
-
-  // Maximum fraction of available PQ slots to use per cycle for row opens
-  static constexpr double DRAM_ROW_SCHEDULER_ISSUE_RATE = 0.5;
   // The scheduler lives only in the LLC
   std::unique_ptr<dram_open::DramRowOpenScheduler> row_open_scheduler;
 
