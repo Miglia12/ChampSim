@@ -114,8 +114,15 @@ public:
       ready_groups[ready_cycle] = ReadyGroup();
     }
 
-    // Add the prefetch to the ready group and return result
-    return ready_groups[ready_cycle].add_prefetch(req, density_weight, confidence_weight, max_confidence, row_buffer_size, m_stats);
+    // Add the prefetch to the ready group
+    bool added = ready_groups[ready_cycle].add_prefetch(req, density_weight, confidence_weight, max_confidence, row_buffer_size, m_stats);
+
+    // Record delay if the request was added
+    if (added) {
+      m_stats.TOTAL_DELAY_CYCLES += delay;
+    }
+
+    return added;
   }
 
   // Collection management
@@ -197,7 +204,7 @@ private:
         continue;
       }
 
-      issued_count += issue_from_ready_group(ready_group, cycle, current_cycle, max_issue - issued_count, try_issue);
+      issued_count += issue_from_ready_group(ready_group, max_issue - issued_count, try_issue);
 
       // Mark empty ready groups for removal
       if (ready_group.empty())
@@ -219,7 +226,7 @@ private:
    * Issue prefetches from a single ready group
    * @return Number of prefetches successfully issued
    */
-  size_t issue_from_ready_group(ReadyGroup& ready_group, cycle_t ready_cycle, cycle_t current_cycle, size_t max_to_issue, request_callback_t try_issue)
+  size_t issue_from_ready_group(ReadyGroup& ready_group, size_t max_to_issue, request_callback_t try_issue)
   {
     // Collect all eligible row candidates with their scores and coordinates
     std::vector<RowCandidate> candidates;
@@ -261,9 +268,6 @@ private:
       const DramRowOpenRequest* pf = row->get_highest_confidence_prefetch();
 
       if (pf && try_issue(*pf)) {
-        // Update statistics - calculate delay based on the ready cycle
-        m_stats.TOTAL_DELAY_CYCLES += ready_cycle > current_cycle ? ready_cycle - current_cycle : 0;
-
         // Update usage counters for balancing
         usage_tracker.record_usage(coords);
 

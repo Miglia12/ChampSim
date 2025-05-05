@@ -35,7 +35,7 @@ struct SchedulerStats {
   {
     const uint64_t TOTAL_INPUT_REQUESTS = REQUESTS_ADDED + DUPLICATES_DETECTED;
     const uint64_t TOTAL_ATTEMPTED_ISSUES = ISSUED_SUCCESS + ISSUE_FAILURES;
-    const double AVG_DELAY = ISSUED_SUCCESS > 0 ? static_cast<double>(TOTAL_DELAY_CYCLES) / static_cast<double>(ISSUED_SUCCESS) : 0.0;
+    const double AVG_DELAY = REQUESTS_ADDED > 0 ? static_cast<double>(TOTAL_DELAY_CYCLES) / static_cast<double>(REQUESTS_ADDED) : 0.0;
 
     std::cout << '\n';
     std::cout << "===== " << name << " Stats =====\n\n";
