@@ -72,20 +72,29 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
   }
 
   if (stats.name == "LLC" && stats.row_open_stats.REQUESTS_ADDED > 0) {
-    const uint64_t TOTAL_INPUT_REQUESTS = stats.row_open_stats.REQUESTS_ADDED + stats.row_open_stats.DUPLICATES_DETECTED;
+    // No DUPLICATES_DETECTED field exists in the structure
+    const uint64_t TOTAL_INPUT_REQUESTS = stats.row_open_stats.REQUESTS_ADDED;
     const uint64_t TOTAL_ATTEMPTED_ISSUES = stats.row_open_stats.ISSUED_SUCCESS + stats.row_open_stats.ISSUE_FAILURES;
 
     float issue_success_rate =
         TOTAL_ATTEMPTED_ISSUES > 0 ? (100.0f * static_cast<float>(stats.row_open_stats.ISSUED_SUCCESS) / static_cast<float>(TOTAL_ATTEMPTED_ISSUES)) : 0.0f;
 
-    statsmap.emplace("ROW_OPEN_SCHEDULER", nlohmann::json{{"REQUESTS", TOTAL_INPUT_REQUESTS},
-                                                          {"ADDED", stats.row_open_stats.REQUESTS_ADDED},
-                                                          {"DUPLICATES", stats.row_open_stats.DUPLICATES_DETECTED},
-                                                          {"ISSUED", stats.row_open_stats.ISSUED_SUCCESS},
-                                                          {"EXPIRED", stats.row_open_stats.PRUNED_EXPIRED},
-                                                          {"FAILED", stats.row_open_stats.ISSUE_FAILURES},
-                                                          {"DROPPED_QUEUE_FULL", stats.row_open_stats.DROPPED_FULL_QUEUE},
-                                                          {"ISSUE_SUCCESS_RATE", issue_success_rate}});
+    // Create JSON object properly with correct field names
+    nlohmann::json scheduler_stats;
+    scheduler_stats["REQUESTS"] = TOTAL_INPUT_REQUESTS;
+    scheduler_stats["ADDED"] = stats.row_open_stats.REQUESTS_ADDED;
+    scheduler_stats["ISSUED"] = stats.row_open_stats.ISSUED_SUCCESS;
+    scheduler_stats["EXPIRED"] = stats.row_open_stats.PRUNED_EXPIRED;
+    scheduler_stats["FAILED"] = stats.row_open_stats.ISSUE_FAILURES;
+    scheduler_stats["DROPPED_FULL"] = stats.row_open_stats.DROPPED_FULL; // Correct field name
+    scheduler_stats["ISSUE_SUCCESS_RATE"] = issue_success_rate;
+
+    if (stats.row_open_stats.ISSUED_SUCCESS > 0) {
+      float avg_delay = static_cast<float>(stats.row_open_stats.TOTAL_DELAY_CYCLES) / static_cast<float>(stats.row_open_stats.ISSUED_SUCCESS);
+      scheduler_stats["AVG_DELAY_CYCLES"] = avg_delay;
+    }
+
+    statsmap.emplace("DRAM_REQUEST_SCHEDULER", scheduler_stats);
   }
 
   j = statsmap;
@@ -107,6 +116,7 @@ void to_json(nlohmann::json& j, const DRAM_CHANNEL::stats_type stats)
     json_obj["SPECULATIVE_ROW_OPENS"] = nlohmann::json{{"REQUESTS", stats.DRAM_ROW_OPEN_REQUESTS},
                                                        {"USEFUL", stats.DRAM_ROW_OPEN_USEFUL},
                                                        {"USELESS", stats.DRAM_ROW_OPEN_USELESS},
+                                                       {"BANK_CONFLICTS", stats.DRAM_ROW_OPEN_BANK_CONFLICT},
                                                        {"USEFUL_RATIO", useful_ratio}};
   }
 

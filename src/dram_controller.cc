@@ -36,6 +36,8 @@ MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, 
     : champsim::operable(mc_period), queues(std::move(ul)), channel_width(chan_width),
       address_mapping(chan_width, BLOCK_SIZE / chan_width.count(), chans, bankgroups, banks, columns, ranks, rows), data_bus_period(dbus_period)
 {
+  printf("[MEM_CONTROLLER] Creating memory controller with address mapping at %p\n", (void*)std::addressof(address_mapping));
+
   for (std::size_t i{0}; i < chans; ++i) {
     channels.emplace_back(dbus_period, mc_period, t_rp, t_rcd, t_cas, t_ras, refresh_period, refreshes_per_period, chan_width, rq_size, wq_size,
                           address_mapping);
@@ -65,6 +67,10 @@ DRAM_ADDRESS_MAPPING::DRAM_ADDRESS_MAPPING(champsim::data::bytes channel_width_,
                                            std::size_t banks_, std::size_t columns_, std::size_t ranks_, std::size_t rows_)
     : address_slicer(make_slicer(channel_width_, pref_size_, channels_, bankgroups_, banks_, columns_, ranks_, rows_)), prefetch_size(pref_size_)
 {
+
+  printf("[MEM_MAPPING] Creating DRAM address mapping at %p: channels=%zu, banks=%zu, rows=%zu, columns=%zu\n", (void*)this, channels_, banks_, rows_,
+         columns_);
+
   // assert prefetch size is not zero
   assert(prefetch_size != 0);
   // assert prefetch size is multiple of block size
@@ -416,6 +422,7 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   // If we're closing a row that was speculatively opened but never accessed, count it as useless
   if (bank_request[op_idx].open_row.has_value() && bank_request[op_idx].opened_speculatively && !bank_request[op_idx].has_been_accessed && !row_buffer_hit) {
     ++sim_stats.DRAM_ROW_OPEN_USELESS;
+    ++sim_stats.DRAM_ROW_OPEN_BANK_CONFLICT;
   }
 
   champsim::chrono::clock::duration activation_delay{};
@@ -488,7 +495,57 @@ void MEMORY_CONTROLLER::initialize()
   fmt::print("DRAM Controller Configuration:\n");
   fmt::print("  - Perfect Speculative Opening: {}\n", perfect_speculative_opening ? "ENABLED" : "DISABLED");
   fmt::print("  - Row-Buffer-Aware Controller: {}\n", use_row_buffer_aware_controller ? "ENABLED" : "DISABLED");
+  fmt::print("  - Enable_dram_controller_access: {}\n", dram_open::parameters::enable_dram_controller_access ? "ENABLED" : "DISABLED");
   fmt::print("  - DRAM_ROW_OPEN_PAYS_TCAS: {}\n", DRAM_ROW_OPEN_PAYS_TCAS ? "ENABLED" : "DISABLED");
+}
+
+bool MEMORY_CONTROLLER::is_bank_ready(champsim::address addr)
+{
+  // Check if the controller is initialized
+  if (!dram_controller_static)
+    return false;
+
+  // Get the channel for this address
+  auto& address_mapping = dram_controller_static->get_address_mapping();
+  unsigned long channel_idx = address_mapping.get_channel(addr);
+
+  if (channel_idx >= dram_controller_static->channels.size())
+    return false;
+
+  // Get the bank index for this address
+  auto& channel = dram_controller_static->channels[channel_idx];
+  std::size_t bank_idx = channel.bank_request_index(addr);
+
+  if (bank_idx >= channel.bank_request.size())
+    return false;
+
+  // Bank is ready if it's not valid (not busy) and not under refresh
+  return (!channel.bank_request[bank_idx].valid && !channel.bank_request[bank_idx].under_refresh);
+}
+
+bool MEMORY_CONTROLLER::would_cause_bank_conflict(champsim::address addr)
+{
+  // Check if the controller is initialized
+  if (!dram_controller_static)
+    return false;
+
+  // Get the channel for this address
+  auto& address_mapping = dram_controller_static->get_address_mapping();
+  unsigned long channel_idx = address_mapping.get_channel(addr);
+
+  if (channel_idx >= dram_controller_static->channels.size())
+    return false;
+
+  // Get the bank index and row for this address
+  auto& channel = dram_controller_static->channels[channel_idx];
+  std::size_t bank_idx = channel.bank_request_index(addr);
+  unsigned long row = address_mapping.get_row(addr);
+
+  if (bank_idx >= channel.bank_request.size())
+    return false;
+
+  // Bank conflict occurs when there's an open row and it's different from our target row
+  return (channel.bank_request[bank_idx].open_row.has_value() && *(channel.bank_request[bank_idx].open_row) != row);
 }
 
 void DRAM_CHANNEL::initialize() {}

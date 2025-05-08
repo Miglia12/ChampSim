@@ -112,6 +112,7 @@ std::pair<champsim::page_number, champsim::chrono::clock::duration> VirtualMemor
   if (fault) {
     ppage_pop();
   }
+  // printf("[VMEM_ACCESS] CPU %u accessing vpage %lu → ppage %lu\n", cpu_num, vaddr.to<uint64_t>(), ppage->second.to<uint64_t>());
 
   auto penalty = fault ? minor_fault_penalty : champsim::chrono::clock::duration::zero();
 

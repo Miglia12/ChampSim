@@ -42,9 +42,9 @@
 #include "champsim.h"
 #include "channel.h"
 #include "chrono.h"
-#include "dram_prefetches_scheduler/dram_row_open_data_structures.h"
-#include "dram_prefetches_scheduler/dram_row_open_scheduler.h"
-#include "dram_prefetches_scheduler/dram_row_open_parameters.h"
+#include "dram_prefetches_scheduler/scheduler.h"
+#include "dram_prefetches_scheduler/scheduler_stats.h"
+#include "dram_prefetches_scheduler/scheduler_parameters.h"
 #include "modules.h"
 #include "operable.h"
 #include "util/to_underlying.h" // for to_underlying
@@ -125,10 +125,9 @@ private:
   void finish_translation(const response_type& packet);
 
   void issue_translation(tag_lookup_type& q_entry) const;
-  void process_row_open_scheduler();
+  void process_dram_scheduler();
 
-public:
-  using BLOCK = champsim::cache_block;
+    public : using BLOCK = champsim::cache_block;
 
 private:
   static BLOCK fill_block(mshr_type mshr, uint32_t metadata);
@@ -225,15 +224,23 @@ public:
   void print_deadlock() final;
 
   static CACHE* llc_static;
-  static VirtualMemory* vmem_static;
+  static std::vector<VirtualMemory*> vmem_static;
 
-  static void initialize_vmem(VirtualMemory* vmem_ptr) { vmem_static = vmem_ptr; }
+  static void initialize_vmem(VirtualMemory* vmem_ptr, uint32_t cpu_id)
+  {
+    if (vmem_static.size() <= cpu_id)
+      vmem_static.resize(cpu_id + 1, nullptr);
+
+    printf("[VMEM] CPU %u registering VM instance at %p\n", cpu_id, static_cast<void*>(vmem_ptr));
+
+    vmem_static[cpu_id] = vmem_ptr;
+  }
 
   // The scheduler lives only in the LLC
-  std::unique_ptr<dram_open::DramRowOpenScheduler> row_open_scheduler;
+  std::unique_ptr<dram_open::DramRequestScheduler> dram_request_scheduler;
 
-  // Non-static submission method (similar to prefetch_line)
-  bool submit_dram_row_open(champsim::address addr, uint32_t confidence, uint32_t metadata, uint64_t ready_delay = 0);
+  // Non-static submission method
+  bool submit_dram_request(champsim::address addr, uint32_t confidence, uint64_t ready_delay);
 
   [[nodiscard]] std::pair<bool, champsim::chrono::clock::duration> check_prefetch_redundancy(const champsim::address& addr) const;
 

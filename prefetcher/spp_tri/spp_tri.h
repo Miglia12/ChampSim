@@ -180,9 +180,6 @@ struct spp_tri : public champsim::modules::prefetcher {
   PREFETCH_FILTER FILTER;
   GLOBAL_REGISTER GHR;
 
-  // DRAM row open scheduler for low-confidence prefetches
-  std::unique_ptr<dram_open::DramRowOpenScheduler> row_scheduler;
-
 private:
   // Helper methods for scheduler integration
   uint64_t get_current_cycle() { return static_cast<uint64_t>(intern_->current_time.time_since_epoch() / intern_->clock_period); }

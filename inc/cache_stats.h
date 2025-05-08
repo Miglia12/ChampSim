@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "channel.h"
-#include "dram_prefetches_scheduler/dram_row_open_stats.h"
+#include "dram_prefetches_scheduler/scheduler_stats.h"
 #include "event_counter.h"
 
 struct cache_stats {

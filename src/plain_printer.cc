@@ -125,14 +125,17 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   }
 
   if (stats.name == "LLC" && stats.row_open_stats.REQUESTS_ADDED > 0) {
-    const uint64_t TOTAL_INPUT_REQUESTS = stats.row_open_stats.REQUESTS_ADDED + stats.row_open_stats.DUPLICATES_DETECTED;
+    // No DUPLICATES_DETECTED field exists in the structure
+    const uint64_t TOTAL_INPUT_REQUESTS = stats.row_open_stats.REQUESTS_ADDED;
     const uint64_t TOTAL_ATTEMPTED_ISSUES = stats.row_open_stats.ISSUED_SUCCESS + stats.row_open_stats.ISSUE_FAILURES;
 
-    lines.push_back(fmt::format("{} DRAM ROW OPEN SCHEDULER REQUESTED: {:10} ADDED: {:10} DUPLICATES: {:10}", stats.name, TOTAL_INPUT_REQUESTS,
-                                stats.row_open_stats.REQUESTS_ADDED, stats.row_open_stats.DUPLICATES_DETECTED));
-    lines.push_back(fmt::format("  ISSUED: {:10} EXPIRED: {:10} FAILED: {:10}", stats.row_open_stats.ISSUED_SUCCESS, stats.row_open_stats.PRUNED_EXPIRED,
-                                stats.row_open_stats.ISSUE_FAILURES));
-    lines.push_back(fmt::format("  DROPPED (QUEUE FULL): {:10}", stats.row_open_stats.DROPPED_FULL_QUEUE));
+    lines.push_back(fmt::format("{} DRAM REQUEST SCHEDULER REQUESTED: {:10}", stats.name, TOTAL_INPUT_REQUESTS));
+
+    lines.push_back(fmt::format("  ADDED: {:10} ISSUED: {:10} EXPIRED: {:10}", stats.row_open_stats.REQUESTS_ADDED, stats.row_open_stats.ISSUED_SUCCESS,
+                                stats.row_open_stats.PRUNED_EXPIRED));
+
+    lines.push_back(fmt::format("  FAILED: {:10} DROPPED (FULL): {:10}", stats.row_open_stats.ISSUE_FAILURES,
+                                stats.row_open_stats.DROPPED_FULL)); // Correct field name
 
     if (stats.row_open_stats.ISSUED_SUCCESS > 0) {
       const double AVG_DELAY = static_cast<double>(stats.row_open_stats.TOTAL_DELAY_CYCLES) / static_cast<double>(stats.row_open_stats.ISSUED_SUCCESS);
@@ -163,6 +166,9 @@ std::vector<std::string> champsim::plain_printer::format(DRAM_CHANNEL::stats_typ
     lines.push_back(fmt::format("{} SPECULATIVE ROW OPENS: {:10}", stats.name, stats.DRAM_ROW_OPEN_REQUESTS));
     lines.push_back(fmt::format("  USEFUL OPENS: {:10}", stats.DRAM_ROW_OPEN_USEFUL));
     lines.push_back(fmt::format("  USELESS OPENS: {:10}", stats.DRAM_ROW_OPEN_USELESS));
+    if (stats.DRAM_ROW_OPEN_USELESS > 0) {
+      lines.push_back(fmt::format("    BANK CONFLICTS: {:10}", stats.DRAM_ROW_OPEN_BANK_CONFLICT));
+    }
     lines.push_back(
         fmt::format("  USEFUL RATIO: {:.2f}%", 100.0f * static_cast<float>(stats.DRAM_ROW_OPEN_USEFUL) / static_cast<float>(stats.DRAM_ROW_OPEN_REQUESTS)));
   }

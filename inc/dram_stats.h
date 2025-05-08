@@ -14,6 +14,7 @@ struct dram_stats {
   unsigned DRAM_ROW_OPEN_REQUESTS = 0; // Total speculative open requests
   unsigned DRAM_ROW_OPEN_USEFUL = 0;   // Hits on speculatively opened rows
   unsigned DRAM_ROW_OPEN_USELESS = 0;  // Speculatively opened rows closed without hits
+  unsigned DRAM_ROW_OPEN_BANK_CONFLICT = 0; // Useless opens that caused bank conflicts
 };
 
 dram_stats operator-(dram_stats lhs, dram_stats rhs);
