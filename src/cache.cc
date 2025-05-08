@@ -34,7 +34,7 @@
 #include "dram_controller.h"
 
 CACHE* CACHE::llc_static = nullptr;
-VirtualMemory* CACHE::vmem_static = nullptr;
+std::vector<VirtualMemory*> CACHE::vmem_static;
 
 CACHE::CACHE(CACHE&& other)
     : operable(other),
@@ -354,15 +354,11 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
     *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
   } else {
-    // Only check MSHR fullness if this isn't a prefetch that's skipping this level
-    bool bypass_mshr = ((handle_pkt.type == access_type::PREFETCH || handle_pkt.type ==  access_type::DRAM_ROW_OPEN) && !mshr_pkt.second.response_requested);
-
-    if (mshr_full && !bypass_mshr) { // not enough MSHR resource
-      return false;
+    if (mshr_full) { // not enough MSHR resource
+      return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
     }
 
-    const bool send_to_rq = (prefetch_as_load && handle_pkt.type == access_type::PREFETCH)
-                            || (handle_pkt.type != access_type::PREFETCH && handle_pkt.type != access_type::DRAM_ROW_OPEN);
+    const bool send_to_rq = (prefetch_as_load || handle_pkt.type != access_type::PREFETCH);
     bool success = send_to_rq ? lower_level->add_rq(mshr_pkt.second) : lower_level->add_pq(mshr_pkt.second);
 
     if (!success) {
@@ -523,9 +519,9 @@ long CACHE::operate()
   inflight_tag_check.erase(tag_check_ready_begin, finish_tag_check_end);
 
   impl_prefetcher_cycle_operate();
-  
-  if (NAME == "LLC" && row_open_scheduler) {
-    process_row_open_scheduler();
+
+  if (NAME == "LLC" && dram_request_scheduler) {
+    process_dram_scheduler();
   }
 
   if constexpr (champsim::debug_print) {
@@ -612,68 +608,73 @@ std::pair<bool, champsim::chrono::clock::duration> CACHE::check_prefetch_redunda
   return {false, check_latency};
 }
 
-void CACHE::process_row_open_scheduler()
+void CACHE::process_dram_scheduler()
 {
   // Only process in LLC
-  if (NAME == "LLC" && row_open_scheduler) {
+  if (NAME == "LLC" && dram_request_scheduler) {
     uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
 
     // Calculate how many prefetches we can issue this cycle
     std::size_t available_pq_slots = PQ_SIZE - std::size(internal_PQ);
 
-    double rate = static_cast<double>(dram_open::SCHEDULER_ISSUE_RATE);
-    double slots_to_use = static_cast<double>(available_pq_slots) * rate;
+    double rate = dram_open::parameters::SCHEDULER_ISSUE_RATE;
+    std::size_t max_issue_per_cycle = std::max(std::size_t{1}, static_cast<std::size_t>(static_cast<double>(available_pq_slots) * rate));
 
-    std::size_t max_issue_per_cycle = std::max(std::size_t{1}, static_cast<std::size_t>(slots_to_use));
-    
-    // Create callback for issuing row open requests
-    auto issue_callback = [this](const dram_open::DramRowOpenRequest& req) -> bool {
-      return this->prefetch_line(req.addr, false, req.metadata, true);
+    // Create callback for issuing requests
+    auto issue_callback = [this](const dram_open::PrefetchRequest& req) -> bool {
+      return this->prefetch_line(req.getAddress(), false, 0, true);
     };
 
     // Process scheduler
-    row_open_scheduler->tick(current_cycle, max_issue_per_cycle, issue_callback);
+    dram_request_scheduler->processCycle(current_cycle, max_issue_per_cycle, issue_callback);
   }
 }
 
-bool CACHE::submit_dram_row_open(champsim::address addr, uint32_t confidence, uint32_t metadata, uint64_t ready_delay)
+bool CACHE::submit_dram_request(champsim::address addr, uint32_t confidence, uint64_t ready_delay)
 {
   // If not LLC, forward to LLC
   if (NAME != "LLC" && llc_static != nullptr) {
-    // Handle virtual-to-physical translation if needed
+
     champsim::address physical_addr = addr;
     champsim::chrono::clock::duration translation_penalty{0};
 
-    if (virtual_prefetch && vmem_static != nullptr) {
-      champsim::page_number vpage = champsim::page_number{addr};
-      champsim::page_offset offset = champsim::page_offset{addr};
-      auto [ppage, penalty] = vmem_static->va_to_pa(cpu, vpage);
-      physical_addr = champsim::address{champsim::splice(ppage, offset)};
-      translation_penalty = penalty;
+    // Handle virtual-to-physical translation
+    if (virtual_prefetch) {
+      if (cpu < vmem_static.size() && vmem_static[cpu] != nullptr) {
+        champsim::page_number vpage = champsim::page_number{addr};
+        champsim::page_offset offset = champsim::page_offset{addr};
+
+        auto [ppage, penalty] = vmem_static[cpu]->va_to_pa(cpu, vpage);
+        physical_addr = champsim::address{champsim::splice(ppage, offset)};
+        translation_penalty = penalty;
+      } else {
+
+        printf("[FATAL ERROR] No VM instance found for CPU %u in cache %s! VM array size: %lu\n", cpu, NAME.c_str(), vmem_static.size());
+
+        // This should never happen
+        assert(false && "Missing virtual memory translation instance");
+
+        physical_addr = addr;
+      }
     }
 
-    // Now check if this request would be redundant using the physical address
+    // Check if this request would be redundant using the physical address
     auto [is_redundant, check_latency] = check_prefetch_redundancy(physical_addr);
 
     if (is_redundant) {
-      // Skip redundant requests
       return false;
     }
 
-    // Calculate total delay: base delay + check latency + translation penalty
+    // Calculate total delay
     uint64_t total_delay = ready_delay + (check_latency.count() / clock_period.count()) + (translation_penalty.count() / clock_period.count());
 
-        // Forward to LLC with updated delay
-    return llc_static->submit_dram_row_open(physical_addr, confidence, metadata, total_delay);
+    return llc_static->submit_dram_request(physical_addr, confidence, total_delay);
   }
 
-  if (row_open_scheduler) {
+  if (dram_request_scheduler) {
     uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
-
-    // Create and add the request
-    dram_open::DramRowOpenRequest req(addr, confidence, metadata);
-
-    return row_open_scheduler->add_request(req, current_cycle, ready_delay);
+    uint64_t issue_time = current_cycle + ready_delay;
+    return dram_request_scheduler->addPrefetchRequest(addr, confidence, issue_time, current_cycle);
   }
 
   return false;
@@ -683,22 +684,7 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
 {
   // If we want to open a DRAM row and we're not already the LLC
   if (open_dram_row && NAME != "LLC" && llc_static != nullptr) {
-
-    champsim::address physical_addr = pf_addr;
-    // If we have a virtual prefetch perform on the spot translation
-    if (virtual_prefetch && vmem_static != nullptr) {
-      // Extract page number and offset
-      champsim::page_number vpage = champsim::page_number{pf_addr};
-      champsim::page_offset offset = champsim::page_offset{pf_addr};
-
-      // Translate page number to physical page
-      auto [ppage, penalty] = vmem_static->va_to_pa(cpu, vpage);
-
-      // Combine to form full physical address
-      physical_addr = champsim::address{champsim::splice(ppage, offset)};
-    }
-
-    return llc_static->prefetch_line(physical_addr, false, prefetch_metadata, true);
+    assert(false && "Use submit_dram_request() instead of direct prefetch_line() call");
   }
 
   ++sim_stats.pf_requested;
@@ -974,21 +960,17 @@ void CACHE::initialize()
 
   // If this is the LLC, set the static pointer and initialize the scheduler
   if (NAME == "LLC") {
-    llc_static = this;
-    
-    row_open_scheduler = std::make_unique<dram_open::DramRowOpenScheduler>(dram_open::SCHEDULER_QUEUE_SIZE,   // Queue size
-                                                                           dram_open::SCHEDULER_SLACK_CYCLES, // Slack cycles
-                                                                           dram_open::DENSITY_WEIGHT,         // Density weight
-                                                                           dram_open::CONFIDENCE_WEIGHT,      // Confidence weight
-                                                                           dram_open::MAX_CONFIDENCE,         // Max confidence value
-                                                                           dram_open::ROW_BUFFER_SIZE         // Row buffer size
-    );
 
-    fmt::print("Initialized LLC DRAM Row Open Scheduler:\n");
-    fmt::print("  - Queue Size: {}\n", dram_open::SCHEDULER_QUEUE_SIZE);
-    fmt::print("  - Slack: {} cycles\n", dram_open::SCHEDULER_SLACK_CYCLES);
-    fmt::print("  - Max Issue Rate: {:.1f}%\n", dram_open::SCHEDULER_ISSUE_RATE * 100.0);
-    fmt::print("  - Density/Confidence Weights: {:.1f}/{:.1f}\n", dram_open::DENSITY_WEIGHT * 100.0, dram_open::CONFIDENCE_WEIGHT * 100.0);
+    fmt::print("[{}] Setting LLC static pointer to {}\n", NAME, static_cast<void*>(this));
+    llc_static = this;
+
+    dram_request_scheduler = std::make_unique<dram_open::DramRequestScheduler>();
+
+    fmt::print("Initialized LLC DRAM Request Scheduler:\n");
+    fmt::print("  - Row Size: {}\n", dram_open::parameters::DRAM_ROW_SIZE);
+    fmt::print("  - Bank Cycle Delay: {} cycles\n", dram_open::parameters::BANK_CYCLE_DELAY);
+    fmt::print("  - Slack: {} cycles\n", dram_open::parameters::SLACK_CYCLES);
+    fmt::print("  - Max Issue Rate: {:.1f}%\n", dram_open::parameters::SCHEDULER_ISSUE_RATE * 100.0);
   }
 }
 
@@ -1010,8 +992,8 @@ void CACHE::begin_phase()
     ul->sim_stats = ul_new_sim_stats;
   }
 
-  if (row_open_scheduler)
-    row_open_scheduler->reset_stats();
+  if (dram_request_scheduler)
+    dram_request_scheduler->resetStats();
 }
 
 void CACHE::end_phase(unsigned finished_cpu)
@@ -1048,9 +1030,8 @@ void CACHE::end_phase(unsigned finished_cpu)
     ul->roi_stats.WQ_FORWARD = ul->sim_stats.WQ_FORWARD;
   }
 
-  if (NAME == "LLC" && row_open_scheduler && cpu == 0 && !warmup) {
-
-    roi_stats.row_open_stats = row_open_scheduler->get_stats();
+  if (NAME == "LLC" && dram_request_scheduler && cpu == 0 && !warmup) {
+    roi_stats.row_open_stats = dram_request_scheduler->getStats();
   }
 }
 

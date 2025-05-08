@@ -25,6 +25,7 @@
 
 #include "address.h"
 #include "bandwidth.h"
+#include "cache.h"
 #include "channel.h"
 #include "operable.h"
 #include "ptw_builder.h"
