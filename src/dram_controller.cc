@@ -425,14 +425,23 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
     ++sim_stats.DRAM_ROW_OPEN_BANK_CONFLICT;
   }
 
+  // Check if this address hits a row that was speculatively opened by our scheduler
+  bool scheduler_row_hit = false;
+  if (!row_buffer_hit) {
+    uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
+
+    // Check if this address hits a row that was speculatively opened
+    scheduler_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(pkt->value().address, current_cycle);
+  }
+
   champsim::chrono::clock::duration activation_delay{};
   champsim::chrono::clock::duration access_delay = tCAS;
 
   bool is_load_or_prefetch = pkt->value().type == access_type::LOAD || pkt->value().type == access_type::PREFETCH;
-
   bool is_speculative_open = pkt->value().type == access_type::DRAM_ROW_OPEN;
 
-  if (perfect_speculative_opening && is_load_or_prefetch) {
+  // Adjust activation delay based on row buffer hit or scheduler row hit
+  if ((perfect_speculative_opening && is_load_or_prefetch) || (scheduler_row_hit && is_load_or_prefetch)) {
     activation_delay = champsim::chrono::clock::duration{}; // Pretend row is already open
   } else {
     activation_delay = bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD;
@@ -491,6 +500,31 @@ void MEMORY_CONTROLLER::initialize()
 
   fmt::print("[MEM] Setting static pointer to {}\n", static_cast<void*>(this));
   dram_controller_static = this;
+
+  // Set up the function pointers for DRAM address mapping
+  dram_open::get_channel_func = [this](champsim::address addr) -> unsigned long {
+    return this->get_address_mapping().get_channel(addr);
+  };
+
+  dram_open::get_rank_func = [this](champsim::address addr) -> unsigned long {
+    return this->get_address_mapping().get_rank(addr);
+  };
+
+  dram_open::get_bankgroup_func = [this](champsim::address addr) -> unsigned long {
+    return this->get_address_mapping().get_bankgroup(addr);
+  };
+
+  dram_open::get_bank_func = [this](champsim::address addr) -> unsigned long {
+    return this->get_address_mapping().get_bank(addr);
+  };
+
+  dram_open::get_row_func = [this](champsim::address addr) -> unsigned long {
+    return this->get_address_mapping().get_row(addr);
+  };
+
+  dram_open::get_column_func = [this](champsim::address addr) -> unsigned long {
+    return this->get_address_mapping().get_column(addr);
+  };
 
   fmt::print("DRAM Controller Configuration:\n");
   fmt::print("  - Perfect Speculative Opening: {}\n", perfect_speculative_opening ? "ENABLED" : "DISABLED");

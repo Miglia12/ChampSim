@@ -1,34 +1,45 @@
 #pragma once
 #include <cstdint>
-#include <iomanip>
-#include <iostream>
-#include <string>
-#include <string_view>
 
 namespace dram_open
 {
 
 /**
  * Statistics collected by the DRAM row open scheduler
+ * Tracks request lifecycle and row utilization metrics
  */
 struct SchedulerStats {
-  uint64_t REQUESTS_ADDED = 0;      // Number of requests successfully added
-  uint64_t DROPPED_FULL = 0;  // Number of requests dropped due to full queue
-  uint64_t PRUNED_EXPIRED = 0;      // Number of requests pruned due to expiration
-  uint64_t ISSUED_SUCCESS = 0;      // Number of requests successfully issued
-  uint64_t ISSUE_FAILURES = 0;      // Number of requests that failed to issue
-  uint64_t TOTAL_DELAY_CYCLES = 0;  // Total delay cycles of added requests
+  // Request tracking
+  std::uint64_t requestsAdded = 0;              // Requests successfully added
+  std::uint64_t requestsDroppedDuplicate = 0;   // Requests dropped as duplicates
+  std::uint64_t latestRequestsObserved = 0;           // Requests that have been serviced
+  std::uint64_t totalLatencyLatestRequest = 0; // Total latency from ready to service
 
-      void
-      reset()
+  // Row tracking
+  std::uint64_t rowsCreated = 0;  // Total rows created
+  std::uint64_t rowsAccessed = 0; // Rows that were accessed at least once
+
+  /**
+   * Resets all statistics to zero
+   */
+  void reset()
   {
-    REQUESTS_ADDED = 0;
-    DROPPED_FULL = 0;
-    PRUNED_EXPIRED = 0;
-    ISSUED_SUCCESS = 0;
-    ISSUE_FAILURES = 0;
-    TOTAL_DELAY_CYCLES = 0;
+    requestsAdded = 0;
+    requestsDroppedDuplicate = 0;
+    latestRequestsObserved = 0;
+    totalLatencyLatestRequest = 0;
+    rowsCreated = 0;
+    rowsAccessed = 0;
   }
 
+  /**
+   * Calculates the average latency from ready to service
+   * @return Average latency in cycles
+   */
+  double getAverageReadyToServiceLatency() const noexcept
+  {
+    return latestRequestsObserved ? static_cast<double>(totalLatencyLatestRequest) / static_cast<double>(latestRequestsObserved) : 0.0;
+  }
 };
-}
+
+} // namespace dram_open

@@ -520,10 +520,6 @@ long CACHE::operate()
 
   impl_prefetcher_cycle_operate();
 
-  if (NAME == "LLC" && dram_request_scheduler) {
-    process_dram_scheduler();
-  }
-
   if constexpr (champsim::debug_print) {
     fmt::print("[{}] {} cycle completed: {} tags checked: {} remaining: {} stash consumed: {} remaining: {} channel consumed: {} pq consumed {} unused consume "
                "bw {}\n",
@@ -606,28 +602,6 @@ std::pair<bool, champsim::chrono::clock::duration> CACHE::check_prefetch_redunda
 
   // Address not found in cache or MSHR
   return {false, check_latency};
-}
-
-void CACHE::process_dram_scheduler()
-{
-  // Only process in LLC
-  if (NAME == "LLC" && dram_request_scheduler) {
-    uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
-
-    // Calculate how many prefetches we can issue this cycle
-    std::size_t available_pq_slots = PQ_SIZE - std::size(internal_PQ);
-
-    double rate = dram_open::parameters::SCHEDULER_ISSUE_RATE;
-    std::size_t max_issue_per_cycle = std::max(std::size_t{1}, static_cast<std::size_t>(static_cast<double>(available_pq_slots) * rate));
-
-    // Create callback for issuing requests
-    auto issue_callback = [this](const dram_open::PrefetchRequest& req) -> bool {
-      return this->prefetch_line(req.getAddress(), false, 0, true);
-    };
-
-    // Process scheduler
-    dram_request_scheduler->processCycle(current_cycle, max_issue_per_cycle, issue_callback);
-  }
 }
 
 bool CACHE::submit_dram_request(champsim::address addr, uint32_t confidence, uint64_t ready_delay)
@@ -960,17 +934,14 @@ void CACHE::initialize()
 
   // If this is the LLC, set the static pointer and initialize the scheduler
   if (NAME == "LLC") {
-
     fmt::print("[{}] Setting LLC static pointer to {}\n", NAME, static_cast<void*>(this));
     llc_static = this;
 
-    dram_request_scheduler = std::make_unique<dram_open::DramRequestScheduler>();
+    dram_request_scheduler = &dram_open::DramRequestScheduler::getInstance();
 
-    fmt::print("Initialized LLC DRAM Request Scheduler:\n");
-    fmt::print("  - Row Size: {}\n", dram_open::parameters::DRAM_ROW_SIZE);
-    fmt::print("  - Bank Cycle Delay: {} cycles\n", dram_open::parameters::BANK_CYCLE_DELAY);
-    fmt::print("  - Slack: {} cycles\n", dram_open::parameters::SLACK_CYCLES);
-    fmt::print("  - Max Issue Rate: {:.1f}%\n", dram_open::parameters::SCHEDULER_ISSUE_RATE * 100.0);
+    fmt::print("  - DRAM Row Scheduler: ENABLED\n");
+    fmt::print("  - Maximum Confidence Level: {}\n", dram_open::parameters::MAXIMUM_CONFIDENCE_LEVEL);
+    fmt::print("  - Speculative Opens Pay tCAS: {}\n", dram_open::parameters::DRAM_ROW_OPEN_PAYS_TCAS ? "Yes" : "No");
   }
 }
 

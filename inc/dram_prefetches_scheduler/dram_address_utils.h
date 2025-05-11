@@ -1,8 +1,8 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 
 #include "address.h"
-#include "dram_controller.h"
 
 namespace dram_open
 {
@@ -21,47 +21,29 @@ struct RowIdentifier {
   bool operator!=(const RowIdentifier& other) const { return !(*this == other); }
 };
 
-inline unsigned long get_dram_channel(champsim::address addr)
-{
-  if (MEMORY_CONTROLLER::dram_controller_static)
-    return MEMORY_CONTROLLER::dram_controller_static->get_address_mapping().get_channel(addr);
-  return 0;
-}
+// Define interface types for DRAM address mapping functions
+using DramAddressFunction = std::function<unsigned long(champsim::address)>;
 
-inline unsigned long get_dram_rank(champsim::address addr)
-{
-  if (MEMORY_CONTROLLER::dram_controller_static)
-    return MEMORY_CONTROLLER::dram_controller_static->get_address_mapping().get_rank(addr);
-  return 0;
-}
+// Global function pointers that will be set by MEMORY_CONTROLLER
+extern DramAddressFunction get_channel_func;
+extern DramAddressFunction get_rank_func;
+extern DramAddressFunction get_bankgroup_func;
+extern DramAddressFunction get_bank_func;
+extern DramAddressFunction get_row_func;
+extern DramAddressFunction get_column_func;
 
-inline unsigned long get_bankgroup(champsim::address addr)
-{
-  if (MEMORY_CONTROLLER::dram_controller_static)
-    return MEMORY_CONTROLLER::dram_controller_static->get_address_mapping().get_bankgroup(addr);
-  return 0;
-}
+// Wrapper functions that use the function pointers if set, otherwise return default values
+inline unsigned long get_dram_channel(champsim::address addr) { return get_channel_func ? get_channel_func(addr) : 0; }
 
-inline unsigned long get_bank(champsim::address addr)
-{
-  if (MEMORY_CONTROLLER::dram_controller_static)
-    return MEMORY_CONTROLLER::dram_controller_static->get_address_mapping().get_bank(addr);
-  return 0;
-}
+inline unsigned long get_dram_rank(champsim::address addr) { return get_rank_func ? get_rank_func(addr) : 0; }
 
-inline unsigned long get_row(champsim::address addr)
-{
-  if (MEMORY_CONTROLLER::dram_controller_static)
-    return MEMORY_CONTROLLER::dram_controller_static->get_address_mapping().get_row(addr);
-  return 0;
-}
+inline unsigned long get_bankgroup(champsim::address addr) { return get_bankgroup_func ? get_bankgroup_func(addr) : 0; }
 
-inline unsigned long get_column(champsim::address addr)
-{
-  if (MEMORY_CONTROLLER::dram_controller_static)
-    return MEMORY_CONTROLLER::dram_controller_static->get_address_mapping().get_column(addr);
-  return 0;
-}
+inline unsigned long get_bank(champsim::address addr) { return get_bank_func ? get_bank_func(addr) : 0; }
+
+inline unsigned long get_row(champsim::address addr) { return get_row_func ? get_row_func(addr) : 0; }
+
+inline unsigned long get_column(champsim::address addr) { return get_column_func ? get_column_func(addr) : 0; }
 
 static RowIdentifier to_RowIdentifier(champsim::address addr) noexcept
 {

@@ -1,14 +1,13 @@
-// dram_row.h
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <memory>
-#include <optional>
+#include <tuple>
 #include <vector>
 
 #include "dram_address_utils.h"
 #include "prefetch_request.h"
-#include "scheduler_parameters.h"
 
 namespace dram_open
 {
@@ -16,127 +15,97 @@ namespace dram_open
 class DramRow
 {
 public:
-  // Private default constructor only for container usage
   DramRow() = default;
 
-  // Primary constructor that requires a row identifier and initial request
+  // Constructor with row identifier and initial request
   DramRow(const RowIdentifier& rowId, PrefetchRequestPtr initialRequest) : rowIdentifier_(rowId)
   {
-    // Add the initial request
+    assert(initialRequest && "Initial request cannot be null");
     requests_.push_back(initialRequest);
   }
 
-  // Add a request to this row
+  /**
+   * Adds a new request to this row
+   * @param request The request to add
+   * @return true if added, false if there was a duplicate
+   */
   bool addRequest(PrefetchRequestPtr request)
   {
-    // Check if row is full
-    if (isFull()) {
+    assert(request && "Attempting to add a null request");
+
+    // Check for duplicate requests
+    auto it = std::find_if(requests_.begin(), requests_.end(), [&request](const auto& existing) { return *existing == *request; });
+
+    if (it != requests_.end())
       return false;
-    }
 
-    // Check if we already have a request for this address
-    auto it = std::find_if(requests_.begin(), requests_.end(),
-                           [&request](const PrefetchRequestPtr& existingRequest) { return existingRequest->getAddress() == request->getAddress(); });
-
-    if (it != requests_.end()) {
-      // If new request has higher confidence, replace the existing one
-      if (request->getConfidenceLevel() > (*it)->getConfidenceLevel()) {
-        *it = request;
-        return true;
-      }
-      return false; // Lower confidence, don't replace
-    }
-
-    // Add new request
     requests_.push_back(request);
     return true;
   }
 
-  // Calculate the score of this row
-  float calculateScore(std::uint64_t currentCycle) const
+  /**
+   * Records an access to this row
+   * @param currentCycle The current cycle
+   * @return A tuple of (serviced request count, last access latency)
+   */
+  std::tuple<std::uint64_t, std::uint64_t> recordAccess(std::uint64_t currentCycle) noexcept
   {
-    auto readyRequests = getReadyRequests(currentCycle);
-    if (readyRequests.empty()) {
-      return 0.0f;
-    }
+    std::uint64_t serviced_request_count = 0;
+    std::uint64_t access_latency = std::numeric_limits<std::uint64_t>::max();
 
-    // Calculate sum of confidence levels
-    float totalConfidence = 0.0f;
-    for (const auto& request : readyRequests) {
-      totalConfidence += request->getConfidenceLevel();
-    }
-
-    // Average confidence weighted by row occupancy
-    return (totalConfidence / static_cast<float>(readyRequests.size()))
-           * (static_cast<float>(readyRequests.size()) / static_cast<float>(parameters::DRAM_ROW_SIZE));
-  }
-
-  // Prune expired requests
-  std::size_t pruneExpiredRequests(std::uint64_t currentCycle)
-  {
-    std::size_t countBefore = requests_.size();
-
-    requests_.erase(
-        std::remove_if(requests_.begin(), requests_.end(), [currentCycle](const PrefetchRequestPtr& request) { return request->isExpired(currentCycle); }),
-        requests_.end());
-
-    return countBefore - requests_.size();
-  }
-
-  // Get the highest confidence ready request
-  std::optional<PrefetchRequestPtr> getHighestConfidenceRequest(std::uint64_t currentCycle) const
-  {
-    std::optional<PrefetchRequestPtr> highestConfidenceRequest = std::nullopt;
-    float highestConfidence = -1.0f;
-
-    for (const auto& request : requests_) {
-      if (request->isReady(currentCycle) && request->getConfidenceLevel() > highestConfidence) {
-        highestConfidence = request->getConfidenceLevel();
-        highestConfidenceRequest = request;
+    for (auto& request : requests_) {
+      if (request->isReady(currentCycle) && !request->isServiced()) {
+        ++serviced_request_count;
+        access_latency = std::min(access_latency, request->markServiced(currentCycle));
       }
     }
 
-    return highestConfidenceRequest;
+    return {serviced_request_count, access_latency};
   }
 
-  // Clear all ready requests and return count
-  std::size_t clearReadyRequests(std::uint64_t currentCycle)
+  /**
+   * Removes requests that have been serviced
+   * @return true if the row is now empty
+   */
+  bool removeServicedRequests() noexcept
   {
-    std::size_t countBefore = requests_.size();
-
-    requests_.erase(
-        std::remove_if(requests_.begin(), requests_.end(), [currentCycle](const PrefetchRequestPtr& request) { return request->isReady(currentCycle); }),
-        requests_.end());
-
-    return countBefore - requests_.size();
+    requests_.erase(std::remove_if(requests_.begin(), requests_.end(), [](const PrefetchRequestPtr& req) { return req->isServiced(); }), requests_.end());
+    return requests_.empty();
   }
 
-  // Getters
+  /**
+   * Checks if this row has any ready and unserviced requests
+   * @param currentCycle The current cycle
+   * @return true if there are ready requests
+   */
+  bool hasReadyRequests(std::uint64_t currentCycle) const noexcept
+  {
+    return std::any_of(requests_.begin(), requests_.end(),
+                       [currentCycle](const PrefetchRequestPtr& req) { return req->isReady(currentCycle) && !req->isServiced(); });
+  }
+
+  /**
+   * Returns the number of requests in this row that are not yet serviced.
+   */
+  std::uint64_t outstandingRequestCount() const noexcept
+  {
+    return static_cast<std::uint64_t>(std::count_if(requests_.begin(), requests_.end(), [](const auto& p) { return !p->isServiced(); }));
+  }
+
+  /**
+   * Returns the identifier of this DRAM row
+   * @return Reference to the RowIdentifier
+   */
   const RowIdentifier& getRowIdentifier() const noexcept { return rowIdentifier_; }
 
-  std::size_t getSize() const noexcept { return requests_.size(); }
-
-  std::size_t getReadyRequestCount(std::uint64_t currentCycle) const noexcept
-  {
-    return std::count_if(requests_.begin(), requests_.end(), [currentCycle](const PrefetchRequestPtr& request) { return request->isReady(currentCycle); });
-  }
-
-  bool isFull() const noexcept { return requests_.size() >= parameters::DRAM_ROW_SIZE; }
+  bool wasAccessed() const noexcept { return accessed_; }
+  void markAccessed() noexcept { accessed_ = true; }
+  void resetAccessedFlag() noexcept { accessed_ = false; }
 
 private:
-  RowIdentifier rowIdentifier_;
-  std::vector<PrefetchRequestPtr> requests_;
-
-  // Helper to find ready requests
-  std::vector<PrefetchRequestPtr> getReadyRequests(std::uint64_t currentCycle) const
-  {
-    std::vector<PrefetchRequestPtr> readyRequests;
-
-    std::copy_if(requests_.begin(), requests_.end(), std::back_inserter(readyRequests),
-                 [currentCycle](const PrefetchRequestPtr& request) { return request->isReady(currentCycle); });
-
-    return readyRequests;
-  }
+  RowIdentifier rowIdentifier_;              // Identifier for this DRAM row
+  std::vector<PrefetchRequestPtr> requests_; // All requests for this row
+  bool accessed_;                            // true after first access
 };
 
-} // namespace dram
+} // namespace dram_open

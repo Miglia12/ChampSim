@@ -237,7 +237,7 @@ public:
   }
 
   // The scheduler lives only in the LLC
-  std::unique_ptr<dram_open::DramRequestScheduler> dram_request_scheduler;
+  dram_open::DramRequestScheduler* dram_request_scheduler = nullptr;
 
   // Non-static submission method
   bool submit_dram_request(champsim::address addr, uint32_t confidence, uint64_t ready_delay);

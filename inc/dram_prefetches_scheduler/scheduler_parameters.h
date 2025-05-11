@@ -8,11 +8,7 @@ namespace parameters
 {
 
 // DRAM scheduler parameters
-inline constexpr std::size_t DRAM_ROW_SIZE = 128;       // Maximum prefetch requests per DRAM row
-inline constexpr std::uint64_t BANK_CYCLE_DELAY = 10000;   // Required cycles between accesses to same bank
-inline constexpr std::uint64_t SLACK_CYCLES = 50;      // Tolerance for late prefetch requests
-inline constexpr std::uint32_t MAXIMUM_CONFIDENCE_LEVEL = 1; // Maximum confidence level for normalization
-inline constexpr float SCHEDULER_ISSUE_RATE = 0.5;          // Max percentage of PQ to use
+inline constexpr std::uint32_t MAXIMUM_CONFIDENCE_LEVEL = 6; // Maximum confidence level for normalization
 
 // DRAM Controller parameters
 inline constexpr bool DRAM_ROW_OPEN_PAYS_TCAS = false;        //  Set to true if speculative opens should pay tCAS

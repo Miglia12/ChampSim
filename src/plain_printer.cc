@@ -124,27 +124,26 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
         fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
   }
 
-  if (stats.name == "LLC" && stats.row_open_stats.REQUESTS_ADDED > 0) {
-    // No DUPLICATES_DETECTED field exists in the structure
-    const uint64_t TOTAL_INPUT_REQUESTS = stats.row_open_stats.REQUESTS_ADDED;
-    const uint64_t TOTAL_ATTEMPTED_ISSUES = stats.row_open_stats.ISSUED_SUCCESS + stats.row_open_stats.ISSUE_FAILURES;
+  if (stats.name == "LLC" && stats.row_open_stats.requestsAdded > 0) {
+    lines.push_back(fmt::format("{} DRAM ROW SCHEDULER STATISTICS:", stats.name));
 
-    lines.push_back(fmt::format("{} DRAM REQUEST SCHEDULER REQUESTED: {:10}", stats.name, TOTAL_INPUT_REQUESTS));
+    // Request tracking statistics
+    lines.push_back(fmt::format("  REQUESTS ADDED: {:10} DROPPED (DUPLICATE): {:10}", stats.row_open_stats.requestsAdded,
+                                stats.row_open_stats.requestsDroppedDuplicate));
 
-    lines.push_back(fmt::format("  ADDED: {:10} ISSUED: {:10} EXPIRED: {:10}", stats.row_open_stats.REQUESTS_ADDED, stats.row_open_stats.ISSUED_SUCCESS,
-                                stats.row_open_stats.PRUNED_EXPIRED));
+    // Row tracking statistics
+    lines.push_back(fmt::format("  ROWS CREATED: {:10} ACCESSED: {:10} TOTAL ACCESSES: {:10}", stats.row_open_stats.rowsCreated,
+                                stats.row_open_stats.rowsAccessed, stats.row_open_stats.latestRequestsObserved));
 
-    lines.push_back(fmt::format("  FAILED: {:10} DROPPED (FULL): {:10}", stats.row_open_stats.ISSUE_FAILURES,
-                                stats.row_open_stats.DROPPED_FULL)); // Correct field name
+    // Latency statistics
+    double avg_latency = stats.row_open_stats.getAverageReadyToServiceLatency();
+    lines.push_back(
+        fmt::format("  AVERAGE: {:.2f} cycles", avg_latency));
 
-    if (stats.row_open_stats.ISSUED_SUCCESS > 0) {
-      const double AVG_DELAY = static_cast<double>(stats.row_open_stats.TOTAL_DELAY_CYCLES) / static_cast<double>(stats.row_open_stats.ISSUED_SUCCESS);
-      lines.push_back(fmt::format("  AVERAGE DELAY: {:.2f} cycles", AVG_DELAY));
-    }
-
-    if (TOTAL_ATTEMPTED_ISSUES > 0) {
-      float issue_success_rate = 100.0f * static_cast<float>(stats.row_open_stats.ISSUED_SUCCESS) / static_cast<float>(TOTAL_ATTEMPTED_ISSUES);
-      lines.push_back(fmt::format("  ISSUE SUCCESS RATE: {:.2f}%", issue_success_rate));
+    // Calculate utilization
+    if (stats.row_open_stats.rowsCreated > 0) {
+      float utilization = 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated);
+      lines.push_back(fmt::format("  ROW UTILIZATION: {:.2f}%", utilization));
     }
   }
 

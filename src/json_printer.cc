@@ -71,28 +71,30 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
     statsmap.emplace(access_type_names.at(champsim::to_underlying(type)), nlohmann::json{{"hit", hits}, {"miss", misses}, {"mshr_merge", mshr_merges}});
   }
 
-  if (stats.name == "LLC" && stats.row_open_stats.REQUESTS_ADDED > 0) {
-    // No DUPLICATES_DETECTED field exists in the structure
-    const uint64_t TOTAL_INPUT_REQUESTS = stats.row_open_stats.REQUESTS_ADDED;
-    const uint64_t TOTAL_ATTEMPTED_ISSUES = stats.row_open_stats.ISSUED_SUCCESS + stats.row_open_stats.ISSUE_FAILURES;
-
-    float issue_success_rate =
-        TOTAL_ATTEMPTED_ISSUES > 0 ? (100.0f * static_cast<float>(stats.row_open_stats.ISSUED_SUCCESS) / static_cast<float>(TOTAL_ATTEMPTED_ISSUES)) : 0.0f;
-
+  if (stats.name == "LLC" && stats.row_open_stats.requestsAdded > 0) {
     // Create JSON object properly with correct field names
     nlohmann::json scheduler_stats;
-    scheduler_stats["REQUESTS"] = TOTAL_INPUT_REQUESTS;
-    scheduler_stats["ADDED"] = stats.row_open_stats.REQUESTS_ADDED;
-    scheduler_stats["ISSUED"] = stats.row_open_stats.ISSUED_SUCCESS;
-    scheduler_stats["EXPIRED"] = stats.row_open_stats.PRUNED_EXPIRED;
-    scheduler_stats["FAILED"] = stats.row_open_stats.ISSUE_FAILURES;
-    scheduler_stats["DROPPED_FULL"] = stats.row_open_stats.DROPPED_FULL; // Correct field name
-    scheduler_stats["ISSUE_SUCCESS_RATE"] = issue_success_rate;
 
-    if (stats.row_open_stats.ISSUED_SUCCESS > 0) {
-      float avg_delay = static_cast<float>(stats.row_open_stats.TOTAL_DELAY_CYCLES) / static_cast<float>(stats.row_open_stats.ISSUED_SUCCESS);
-      scheduler_stats["AVG_DELAY_CYCLES"] = avg_delay;
+    // Request statistics - use your actual field names
+    scheduler_stats["REQUESTS_ADDED"] = stats.row_open_stats.requestsAdded;
+    scheduler_stats["DROPPED_DUPLICATES"] = stats.row_open_stats.requestsDroppedDuplicate;
+
+    // Row statistics
+    scheduler_stats["ROWS_CREATED"] = stats.row_open_stats.rowsCreated;
+    scheduler_stats["ROWS_ACCESSED"] = stats.row_open_stats.rowsAccessed;
+    scheduler_stats["TOTAL_ACCESSES"] = stats.row_open_stats.latestRequestsObserved;
+
+    // Latency statistics
+    scheduler_stats["TOTAL_READY_TO_SERVICE_LATENCY"] = stats.row_open_stats.totalLatencyLatestRequest;
+
+    // Calculate average latency if there are serviced requests
+    if (stats.row_open_stats.latestRequestsObserved > 0) {
+      float avg_latency = static_cast<float>(stats.row_open_stats.totalLatencyLatestRequest) / static_cast<float>(stats.row_open_stats.latestRequestsObserved);
+      scheduler_stats["AVG_READY_TO_SERVICE_LATENCY"] = avg_latency;
     }
+
+    // Add any calculated metrics from your getAverageReadyToServiceLatency method
+    scheduler_stats["AVG_LATENCY"] = stats.row_open_stats.getAverageReadyToServiceLatency();
 
     statsmap.emplace("DRAM_REQUEST_SCHEDULER", scheduler_stats);
   }
