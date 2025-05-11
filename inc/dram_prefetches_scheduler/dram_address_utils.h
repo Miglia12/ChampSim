@@ -12,10 +12,12 @@ struct RowIdentifier {
   unsigned long rank;
   unsigned long bankGroup;
   unsigned long bank;
+  unsigned long row;
 
   bool operator==(const RowIdentifier& other) const
   {
-    return channel == other.channel && rank == other.rank && bankGroup == other.bankGroup && bank == other.bank;
+    return channel == other.channel && rank == other.rank && bankGroup == other.bankGroup && bank == other.bank
+           && row == other.row;
   }
 
   bool operator!=(const RowIdentifier& other) const { return !(*this == other); }
@@ -47,7 +49,7 @@ inline unsigned long get_column(champsim::address addr) { return get_column_func
 
 static RowIdentifier to_RowIdentifier(champsim::address addr) noexcept
 {
-  return {get_dram_channel(addr), get_dram_rank(addr), get_bankgroup(addr), get_bank(addr)};
+  return {get_dram_channel(addr), get_dram_rank(addr), get_bankgroup(addr), get_bank(addr), get_row(addr)};
 }
 
 } // namespace dram_open
