@@ -15,10 +15,10 @@ namespace dram_open
 class DramRow
 {
 public:
-  DramRow() = default;
+  DramRow() : accessed_(false) {}
 
   // Constructor with row identifier and initial request
-  DramRow(const RowIdentifier& rowId, PrefetchRequestPtr initialRequest) : rowIdentifier_(rowId)
+  DramRow(const RowIdentifier& rowId, PrefetchRequestPtr initialRequest) : rowIdentifier_(rowId), accessed_(false)
   {
     assert(initialRequest && "Initial request cannot be null");
     requests_.push_back(initialRequest);

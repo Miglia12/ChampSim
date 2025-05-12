@@ -417,44 +417,42 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   if (bank_request[op_idx].valid || bank_request[op_idx].under_refresh)
     return progress;
 
+  // Check for physical row buffer hit
   bool row_buffer_hit = bank_request[op_idx].open_row.has_value() && (*bank_request[op_idx].open_row == op_row);
 
-  // If we're closing a row that was speculatively opened but never accessed, count it as useless
+  // Track stats for speculatively opened rows that weren't useful
   if (bank_request[op_idx].open_row.has_value() && bank_request[op_idx].opened_speculatively && !bank_request[op_idx].has_been_accessed && !row_buffer_hit) {
     ++sim_stats.DRAM_ROW_OPEN_USELESS;
     ++sim_stats.DRAM_ROW_OPEN_BANK_CONFLICT;
   }
 
-  // Check if this address hits a row that was speculatively opened by our scheduler
-  bool scheduler_row_hit = false;
-  if (!row_buffer_hit) {
-    uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
-
-    // Check if this address hits a row that was speculatively opened
-    scheduler_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(pkt->value().address, current_cycle);
-  }
-
-  champsim::chrono::clock::duration activation_delay{};
-  champsim::chrono::clock::duration access_delay = tCAS;
-
+  // Determine request types
   bool is_load_or_prefetch = pkt->value().type == access_type::LOAD || pkt->value().type == access_type::PREFETCH;
   bool is_speculative_open = pkt->value().type == access_type::DRAM_ROW_OPEN;
 
-  // Adjust activation delay based on row buffer hit or scheduler row hit
-  if ((perfect_speculative_opening && is_load_or_prefetch) || (scheduler_row_hit && is_load_or_prefetch)) {
-    activation_delay = champsim::chrono::clock::duration{}; // Pretend row is already open
-  } else {
-    activation_delay = bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD;
+  // Only check scheduler if there's no physical hit and this is a demand access
+  bool scheduler_row_hit = false;
+  if (!row_buffer_hit && is_load_or_prefetch) {
+    uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
+    scheduler_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(pkt->value().address, current_cycle);
   }
 
-  if (is_speculative_open && !DRAM_ROW_OPEN_PAYS_TCAS) {
-    access_delay = champsim::chrono::clock::duration{};
-  }
+  // Determine if we should skip activation delay
+  bool skip_activation = row_buffer_hit || (scheduler_row_hit && is_load_or_prefetch) || (perfect_speculative_opening && is_load_or_prefetch);
 
-  auto ready_time = current_time + access_delay + (row_buffer_hit ? champsim::chrono::clock::duration{} : activation_delay);
+  // Calculate delays
+  champsim::chrono::clock::duration activation_delay =
+      skip_activation ? champsim::chrono::clock::duration{} : (bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD);
 
+  champsim::chrono::clock::duration access_delay = (is_speculative_open && !DRAM_ROW_OPEN_PAYS_TCAS) ? champsim::chrono::clock::duration{} : tCAS;
+
+  // Calculate final ready time
+  auto ready_time = current_time + access_delay + activation_delay;
+
+  // Remember if this was a speculative open
   bool was_spec_open = bank_request[op_idx].opened_speculatively;
 
+  // Update bank request
   bank_request[op_idx] = {/* valid */ true,
                           /* row_buffer_hit */ row_buffer_hit,
                           /* need_refresh */ false,
@@ -465,7 +463,7 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
                           /* ready_time */ ready_time,
                           /* pkt */ pkt};
 
-  // but if this is not itself a DRAM_ROW_OPEN, propagate the old flag:
+  // Propagate the speculative flag
   if (!is_speculative_open && was_spec_open) {
     bank_request[op_idx].opened_speculatively = true;
   }

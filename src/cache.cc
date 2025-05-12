@@ -622,12 +622,8 @@ bool CACHE::submit_dram_request(champsim::address addr, uint32_t confidence, uin
         physical_addr = champsim::address{champsim::splice(ppage, offset)};
         translation_penalty = penalty;
       } else {
-
-        printf("[FATAL ERROR] No VM instance found for CPU %u in cache %s! VM array size: %lu\n", cpu, NAME.c_str(), vmem_static.size());
-
-        // This should never happen
+        printf("[FATAL ERROR] No VM instance found for CPU %u in cache %s!\n", cpu, NAME.c_str());
         assert(false && "Missing virtual memory translation instance");
-
         physical_addr = addr;
       }
     }
