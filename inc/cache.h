@@ -125,9 +125,8 @@ private:
   void finish_translation(const response_type& packet);
 
   void issue_translation(tag_lookup_type& q_entry) const;
-  void process_dram_scheduler();
 
-    public : using BLOCK = champsim::cache_block;
+  public : using BLOCK = champsim::cache_block;
 
 private:
   static BLOCK fill_block(mshr_type mshr, uint32_t metadata);
@@ -238,6 +237,9 @@ public:
 
   // The scheduler lives only in the LLC
   dram_open::DramRequestScheduler* dram_request_scheduler = nullptr;
+
+  // Static clock cycle
+  static uint64_t get_llc_cycle();
 
   // Non-static submission method
   bool submit_dram_request(champsim::address addr, uint32_t confidence, uint64_t ready_delay);

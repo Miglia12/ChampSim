@@ -125,28 +125,27 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   }
 
   if (stats.name == "LLC" && stats.row_open_stats.requestsAdded > 0) {
-    lines.push_back(fmt::format("{} DRAM ROW SCHEDULER STATISTICS:", stats.name));
+      lines.push_back(fmt::format("{} DRAM ROW SCHEDULER STATISTICS:", stats.name));
 
-    // Request tracking statistics
-    lines.push_back(fmt::format("  REQUESTS ADDED: {:10} DROPPED (DUPLICATE): {:10}", stats.row_open_stats.requestsAdded,
-                                stats.row_open_stats.requestsDroppedDuplicate));
+      // Request tracking statistics
+      lines.push_back(fmt::format("  REQUESTS ADDED: {:10} DROPPED (DUPLICATE): {:10}", stats.row_open_stats.requestsAdded,
+                              stats.row_open_stats.requestsDroppedDuplicate));
 
-    // Row tracking statistics
-    lines.push_back(fmt::format("  ROWS CREATED: {:10} ACCESSED: {:10} TOTAL ACCESSES: {:10}", stats.row_open_stats.rowsCreated,
-                                stats.row_open_stats.rowsAccessed, stats.row_open_stats.latestRequestsObserved));
+      // Row tracking statistics
+      lines.push_back(fmt::format("  ROWS CREATED: {:10} ACCESSED: {:10} TOTAL ACCESSES: {:10}", stats.row_open_stats.rowsCreated,
+                              stats.row_open_stats.rowsAccessed, stats.row_open_stats.latestRequestsObserved));
 
-    // Latency statistics
-    double avg_latency = stats.row_open_stats.getAverageReadyToServiceLatency();
-    lines.push_back(
-        fmt::format("  AVERAGE: {:.2f} cycles", avg_latency));
+      // Latency statistics
+      double avg_latency = stats.row_open_stats.getAverageReadyToServiceLatency();
+      lines.push_back(fmt::format("  AVERAGE LATENCY: {:.2f} cycles", avg_latency));
 
-    // Calculate utilization
-    if (stats.row_open_stats.rowsCreated > 0) {
-      float utilization = 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated);
-      lines.push_back(fmt::format("  ROW UTILIZATION: {:.2f}%", utilization));
-    }
+      // Calculate utilization
+      if (stats.row_open_stats.rowsCreated > 0) {
+          float utilization = 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated);
+          lines.push_back(fmt::format("  ROW UTILIZATION: {:.2f}%", utilization));
+      }
+  
   }
-
   return lines;
 }
 

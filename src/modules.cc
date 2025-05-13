@@ -25,7 +25,7 @@ bool champsim::modules::prefetcher::prefetch_line(champsim::address pf_addr, boo
 
 bool champsim::modules::prefetcher::submit_dram_row_open(champsim::address addr, uint32_t confidence, uint32_t metadata, uint64_t ready_delay) const
 {
-
+  (void) metadata;
   return intern_->submit_dram_request(addr, confidence, ready_delay);
 }
 

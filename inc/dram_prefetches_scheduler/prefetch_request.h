@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 
 #include "address.h"
@@ -17,40 +18,44 @@ class PrefetchRequest
 {
 public:
   // Constructor for a prefetch request with specified address, confidence, and ready time
-  PrefetchRequest(champsim::address address, std::uint32_t confidenceLevel, std::uint64_t readyCycle) noexcept
-      : address_(address), readyCycle_(readyCycle), servicedCycle_(0)
+  PrefetchRequest(champsim::address address, std::uint32_t confidenceLevel, std::uint64_t addedCycle) noexcept
+      : address_(address), addedCycle_(addedCycle)
   {
+    if (confidenceLevel > parameters::MAXIMUM_CONFIDENCE_LEVEL) {
+      std::cerr << "Assertion failed: confidenceLevel (" << confidenceLevel
+                << ") > MAXIMUM_CONFIDENCE_LEVEL (" << parameters::MAXIMUM_CONFIDENCE_LEVEL << ")\n";
+    }
     assert(confidenceLevel <= parameters::MAXIMUM_CONFIDENCE_LEVEL && "Higher than maximum confidence allows");
-    (void)confidenceLevel;
+
+    this->confidence_ = static_cast<float>(confidenceLevel) / parameters::MAXIMUM_CONFIDENCE_LEVEL;
   }
 
-  // Returns true if the request is ready at the given cycle
-  bool isReady(std::uint64_t currentCycle) const noexcept { return currentCycle >= readyCycle_; }
-
-  // Returns true if the request has been serviced
-  bool isServiced() const noexcept { return servicedCycle_ > 0; }
-
-  // Marks this request as serviced at the given cycle
-  std::uint64_t markServiced(std::uint64_t cycle) noexcept
+  // Return the delay from when this request was added to when it was used
+  std::uint64_t get_delay(std::uint64_t cycle) noexcept
   {
-    assert(!isServiced() && "Request was serviced more than once");
-    servicedCycle_ = cycle;
-    assert(servicedCycle_ >= readyCycle_ && "Request was serviced before it became ready");
-    return servicedCycle_ - readyCycle_;
+    assert(cycle >= addedCycle_ && "Request is being used before it became ready");
+    return cycle - addedCycle_;
   }
 
-  // Equality is defined by address and ready time (duplicate detection)
-  bool operator==(const PrefetchRequest& rhs) const noexcept { return address_ == rhs.address_ && readyCycle_ == rhs.readyCycle_; }
+  float get_confidence() const noexcept {
+    return confidence_;
+  }
 
-  bool operator!=(const PrefetchRequest& rhs) const noexcept { return !(*this == rhs); }
+  // Compare by block number instead of full address
+  bool operator==(const PrefetchRequest& rhs) const noexcept { 
+    return champsim::block_number{address_} == champsim::block_number{rhs.address_}; 
+  }
+
+  bool operator!=(const PrefetchRequest& rhs) const noexcept { 
+    return !(*this == rhs); 
+  }
 
 private:
   champsim::address address_;   // Memory address for this request
-  std::uint64_t readyCycle_;    // Cycle when this request becomes ready
-  std::uint64_t servicedCycle_; // Cycle when this request was serviced (0 = not yet)
+  std::uint64_t addedCycle_;    // Cycle when this request becomes ready
+  float confidence_;
 };
 
-// Smart pointer type for prefetch requests
 using PrefetchRequestPtr = std::shared_ptr<PrefetchRequest>;
 
 } // namespace dram_open

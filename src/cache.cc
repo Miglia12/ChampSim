@@ -604,10 +604,15 @@ std::pair<bool, champsim::chrono::clock::duration> CACHE::check_prefetch_redunda
   return {false, check_latency};
 }
 
+uint64_t CACHE::get_llc_cycle() {
+  assert(llc_static != nullptr && "Error: LLC static pointer not initialized\n");
+  return llc_static->current_time.time_since_epoch() / llc_static->clock_period;
+}
+
 bool CACHE::submit_dram_request(champsim::address addr, uint32_t confidence, uint64_t ready_delay)
 {
   // If not LLC, forward to LLC
-  if (NAME != "LLC" && llc_static != nullptr) {
+  if (NAME != "LLC") {
 
     champsim::address physical_addr = addr;
     champsim::chrono::clock::duration translation_penalty{0};
@@ -631,9 +636,9 @@ bool CACHE::submit_dram_request(champsim::address addr, uint32_t confidence, uin
     // Check if this request would be redundant using the physical address
     auto [is_redundant, check_latency] = check_prefetch_redundancy(physical_addr);
 
-    if (is_redundant) {
-      return false;
-    }
+    // if (is_redundant) {
+    //   return false;
+    // }
 
     // Calculate total delay
     uint64_t total_delay = ready_delay + (check_latency.count() / clock_period.count()) + (translation_penalty.count() / clock_period.count());
@@ -641,11 +646,16 @@ bool CACHE::submit_dram_request(champsim::address addr, uint32_t confidence, uin
     return llc_static->submit_dram_request(physical_addr, confidence, total_delay);
   }
 
-  if (dram_request_scheduler) {
-    uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
-    uint64_t issue_time = current_cycle + ready_delay;
-    return dram_request_scheduler->addPrefetchRequest(addr, confidence, issue_time, current_cycle);
-  }
+  if (dram_request_scheduler && NAME == "LLC") {
+      assert(llc_static != nullptr && "LLC static Pointer not set");
+      
+      uint64_t current_cycle = get_llc_cycle();
+      // uint64_t issue_time = current_cycle + ready_delay; //NOTE we do not accound for dealy in this implementation
+
+      uint64_t issue_time = current_cycle;
+      auto row_id = MEMORY_CONTROLLER::get_row_identifier(addr);
+      return dram_request_scheduler->addPrefetchRequest(row_id, addr, confidence, issue_time);
+    }
 
   return false;
 }
@@ -959,8 +969,9 @@ void CACHE::begin_phase()
     ul->sim_stats = ul_new_sim_stats;
   }
 
-  if (dram_request_scheduler)
+  if (dram_request_scheduler) {
     dram_request_scheduler->resetStats();
+  }
 }
 
 void CACHE::end_phase(unsigned finished_cpu)

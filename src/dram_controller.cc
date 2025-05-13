@@ -433,8 +433,9 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   // Only check scheduler if there's no physical hit and this is a demand access
   bool scheduler_row_hit = false;
   if (!row_buffer_hit && is_load_or_prefetch) {
-    uint64_t current_cycle = current_time.time_since_epoch() / clock_period;
-    scheduler_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(pkt->value().address, current_cycle);
+    uint64_t current_cycle = CACHE::get_llc_cycle();
+    auto row_id = MEMORY_CONTROLLER::get_row_identifier(pkt->value().address);
+    scheduler_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(row_id, current_cycle);
   }
 
   // Determine if we should skip activation delay
@@ -499,85 +500,10 @@ void MEMORY_CONTROLLER::initialize()
   fmt::print("[MEM] Setting static pointer to {}\n", static_cast<void*>(this));
   dram_controller_static = this;
 
-  // Set up the function pointers for DRAM address mapping
-  dram_open::get_channel_func = [this](champsim::address addr) -> unsigned long {
-    return this->get_address_mapping().get_channel(addr);
-  };
-
-  dram_open::get_rank_func = [this](champsim::address addr) -> unsigned long {
-    return this->get_address_mapping().get_rank(addr);
-  };
-
-  dram_open::get_bankgroup_func = [this](champsim::address addr) -> unsigned long {
-    return this->get_address_mapping().get_bankgroup(addr);
-  };
-
-  dram_open::get_bank_func = [this](champsim::address addr) -> unsigned long {
-    return this->get_address_mapping().get_bank(addr);
-  };
-
-  dram_open::get_row_func = [this](champsim::address addr) -> unsigned long {
-    return this->get_address_mapping().get_row(addr);
-  };
-
-  dram_open::get_column_func = [this](champsim::address addr) -> unsigned long {
-    return this->get_address_mapping().get_column(addr);
-  };
-
   fmt::print("DRAM Controller Configuration:\n");
   fmt::print("  - Perfect Speculative Opening: {}\n", perfect_speculative_opening ? "ENABLED" : "DISABLED");
   fmt::print("  - Row-Buffer-Aware Controller: {}\n", use_row_buffer_aware_controller ? "ENABLED" : "DISABLED");
-  fmt::print("  - Enable_dram_controller_access: {}\n", dram_open::parameters::enable_dram_controller_access ? "ENABLED" : "DISABLED");
   fmt::print("  - DRAM_ROW_OPEN_PAYS_TCAS: {}\n", DRAM_ROW_OPEN_PAYS_TCAS ? "ENABLED" : "DISABLED");
-}
-
-bool MEMORY_CONTROLLER::is_bank_ready(champsim::address addr)
-{
-  // Check if the controller is initialized
-  if (!dram_controller_static)
-    return false;
-
-  // Get the channel for this address
-  auto& address_mapping = dram_controller_static->get_address_mapping();
-  unsigned long channel_idx = address_mapping.get_channel(addr);
-
-  if (channel_idx >= dram_controller_static->channels.size())
-    return false;
-
-  // Get the bank index for this address
-  auto& channel = dram_controller_static->channels[channel_idx];
-  std::size_t bank_idx = channel.bank_request_index(addr);
-
-  if (bank_idx >= channel.bank_request.size())
-    return false;
-
-  // Bank is ready if it's not valid (not busy) and not under refresh
-  return (!channel.bank_request[bank_idx].valid && !channel.bank_request[bank_idx].under_refresh);
-}
-
-bool MEMORY_CONTROLLER::would_cause_bank_conflict(champsim::address addr)
-{
-  // Check if the controller is initialized
-  if (!dram_controller_static)
-    return false;
-
-  // Get the channel for this address
-  auto& address_mapping = dram_controller_static->get_address_mapping();
-  unsigned long channel_idx = address_mapping.get_channel(addr);
-
-  if (channel_idx >= dram_controller_static->channels.size())
-    return false;
-
-  // Get the bank index and row for this address
-  auto& channel = dram_controller_static->channels[channel_idx];
-  std::size_t bank_idx = channel.bank_request_index(addr);
-  unsigned long row = address_mapping.get_row(addr);
-
-  if (bank_idx >= channel.bank_request.size())
-    return false;
-
-  // Bank conflict occurs when there's an open row and it's different from our target row
-  return (channel.bank_request[bank_idx].open_row.has_value() && *(channel.bank_request[bank_idx].open_row) != row);
 }
 
 void DRAM_CHANNEL::initialize() {}
@@ -808,6 +734,19 @@ std::size_t DRAM_ADDRESS_MAPPING::banks() const { return std::size_t{1} << champ
 std::size_t DRAM_ADDRESS_MAPPING::channels() const { return std::size_t{1} << champsim::size(get<SLICER_CHANNEL_IDX>(address_slicer)); }
 std::size_t DRAM_CHANNEL::bank_request_capacity() const { return std::size(bank_request); }
 std::size_t DRAM_CHANNEL::bankgroup_request_capacity() const { return std::size(bankgroup_readytime); };
+
+dram_open::RowIdentifier MEMORY_CONTROLLER::get_row_identifier(champsim::address addr) {
+  assert(dram_controller_static && "Error: dram_controller_static is null. Memory controller not initialized.");
+  
+  const auto& address_mapping = dram_controller_static->get_address_mapping();
+  return dram_open::RowIdentifier{
+    address_mapping.get_channel(addr),
+    address_mapping.get_rank(addr),
+    address_mapping.get_bankgroup(addr),
+    address_mapping.get_bank(addr),
+    address_mapping.get_row(addr)
+  };
+}
 
 // LCOV_EXCL_START Exclude the following function from LCOV
 void MEMORY_CONTROLLER::print_deadlock()

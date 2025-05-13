@@ -35,6 +35,7 @@
 #include "dram_stats.h"
 #include "extent_set.h"
 #include "operable.h"
+#include "cache.h"
 
 // Set to true if speculative opens should pay tCAS
 constexpr bool DRAM_ROW_OPEN_PAYS_TCAS = dram_open::parameters::DRAM_ROW_OPEN_PAYS_TCAS;
@@ -221,12 +222,7 @@ class MEMORY_CONTROLLER : public champsim::operable
 public:
   std::vector<DRAM_CHANNEL> channels;
   static MEMORY_CONTROLLER* dram_controller_static;
-
-  // Check if a bank is ready to accept a new request
-  static bool is_bank_ready(champsim::address addr);
-
-  // Check if accessing this address would create a bank conflict
-  static bool would_cause_bank_conflict(champsim::address addr);
+  static dram_open::RowIdentifier get_row_identifier(champsim::address addr);
   
   const DRAM_ADDRESS_MAPPING& get_address_mapping() const { return address_mapping; }
 

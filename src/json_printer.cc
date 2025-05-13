@@ -72,31 +72,39 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
   }
 
   if (stats.name == "LLC" && stats.row_open_stats.requestsAdded > 0) {
-    // Create JSON object properly with correct field names
-    nlohmann::json scheduler_stats;
+      // Create JSON object properly with correct field names
+      nlohmann::json scheduler_stats;
 
-    // Request statistics - use your actual field names
-    scheduler_stats["REQUESTS_ADDED"] = stats.row_open_stats.requestsAdded;
-    scheduler_stats["DROPPED_DUPLICATES"] = stats.row_open_stats.requestsDroppedDuplicate;
+      // Request statistics
+      scheduler_stats["REQUESTS_ADDED"] = stats.row_open_stats.requestsAdded;
+      scheduler_stats["DROPPED_DUPLICATES"] = stats.row_open_stats.requestsDroppedDuplicate;
 
-    // Row statistics
-    scheduler_stats["ROWS_CREATED"] = stats.row_open_stats.rowsCreated;
-    scheduler_stats["ROWS_ACCESSED"] = stats.row_open_stats.rowsAccessed;
-    scheduler_stats["TOTAL_ACCESSES"] = stats.row_open_stats.latestRequestsObserved;
+      // Row statistics
+      scheduler_stats["ROWS_CREATED"] = stats.row_open_stats.rowsCreated;
+      scheduler_stats["ROWS_ACCESSED"] = stats.row_open_stats.rowsAccessed;
+      scheduler_stats["TOTAL_ACCESSES"] = stats.row_open_stats.latestRequestsObserved;
 
-    // Latency statistics
-    scheduler_stats["TOTAL_READY_TO_SERVICE_LATENCY"] = stats.row_open_stats.totalLatencyLatestRequest;
+      // Latency statistics
+      scheduler_stats["TOTAL_READY_TO_SERVICE_LATENCY"] = stats.row_open_stats.totalLatencyLatestRequest;
 
-    // Calculate average latency if there are serviced requests
-    if (stats.row_open_stats.latestRequestsObserved > 0) {
-      float avg_latency = static_cast<float>(stats.row_open_stats.totalLatencyLatestRequest) / static_cast<float>(stats.row_open_stats.latestRequestsObserved);
-      scheduler_stats["AVG_READY_TO_SERVICE_LATENCY"] = avg_latency;
-    }
-
-    // Add any calculated metrics from your getAverageReadyToServiceLatency method
-    scheduler_stats["AVG_LATENCY"] = stats.row_open_stats.getAverageReadyToServiceLatency();
-
-    statsmap.emplace("DRAM_REQUEST_SCHEDULER", scheduler_stats);
+      // Calculate average latency if there are serviced requests
+      if (stats.row_open_stats.latestRequestsObserved > 0) {
+          float avg_latency = static_cast<float>(stats.row_open_stats.totalLatencyLatestRequest) / 
+                            static_cast<float>(stats.row_open_stats.latestRequestsObserved);
+          scheduler_stats["AVG_READY_TO_SERVICE_LATENCY"] = avg_latency;
+      }
+      
+      // Add any calculated metrics from your getAverageReadyToServiceLatency method
+      scheduler_stats["AVG_LATENCY"] = stats.row_open_stats.getAverageReadyToServiceLatency();
+      
+      // Add row utilization percentage (currently only in plain text output)
+      if (stats.row_open_stats.rowsCreated > 0) {
+          float utilization = 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / 
+                            static_cast<float>(stats.row_open_stats.rowsCreated);
+          scheduler_stats["ROW_UTILIZATION_PERCENT"] = utilization;
+      }
+    
+      statsmap.emplace("DRAM_REQUEST_SCHEDULER", scheduler_stats);
   }
 
   j = statsmap;
