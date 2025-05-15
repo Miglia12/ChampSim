@@ -430,6 +430,8 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   bool is_load_or_prefetch = pkt->value().type == access_type::LOAD || pkt->value().type == access_type::PREFETCH;
   bool is_speculative_open = pkt->value().type == access_type::DRAM_ROW_OPEN;
 
+  assert(!is_speculative_open && "In this version speculative open requets should not be generated");
+
   // Only check scheduler if there's no physical hit and this is a demand access
   bool scheduler_row_hit = false;
   if (!row_buffer_hit && is_load_or_prefetch) {

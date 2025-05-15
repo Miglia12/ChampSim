@@ -125,26 +125,49 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   }
 
   if (stats.name == "LLC" && stats.row_open_stats.requestsAdded > 0) {
-      lines.push_back(fmt::format("{} DRAM ROW SCHEDULER STATISTICS:", stats.name));
+    lines.push_back(fmt::format("{} DRAM ROW BUFFER PREFETCH SCHEDULER:", stats.name));
 
-      // Request tracking statistics
-      lines.push_back(fmt::format("  REQUESTS ADDED: {:10} DROPPED (DUPLICATE): {:10}", stats.row_open_stats.requestsAdded,
-                              stats.row_open_stats.requestsDroppedDuplicate));
+    // Request tracking statistics
+    lines.push_back(fmt::format("  PREFETCH REQUESTS: {:10} DROPPED (DUPLICATE): {:10}", stats.row_open_stats.requestsAdded,
+                                stats.row_open_stats.requestsDroppedDuplicate));
 
-      // Row tracking statistics
-      lines.push_back(fmt::format("  ROWS CREATED: {:10} ACCESSED: {:10} TOTAL ACCESSES: {:10}", stats.row_open_stats.rowsCreated,
-                              stats.row_open_stats.rowsAccessed, stats.row_open_stats.latestRequestsObserved));
+    // Row tracking statistics
+    lines.push_back(fmt::format("  ROWS TRACKED: {:10} ACCESSED: {:10} ACCESS RATIO: {:.2f}%", stats.row_open_stats.rowsCreated,
+                                stats.row_open_stats.rowsAccessed,
+                                (stats.row_open_stats.rowsCreated > 0)
+                                    ? 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated)
+                                    : 0.0f));
 
-      // Latency statistics
-      double avg_latency = stats.row_open_stats.getAverageReadyToServiceLatency();
-      lines.push_back(fmt::format("  AVERAGE LATENCY: {:.2f} cycles", avg_latency));
+    // Latency statistics
+    double avg_latency = stats.row_open_stats.getAverageReadyToServiceLatency();
+    lines.push_back(fmt::format("  AVG PREFETCH-TO-USE LATENCY: {:.2f} cycles", avg_latency));
 
-      // Calculate utilization
-      if (stats.row_open_stats.rowsCreated > 0) {
-          float utilization = 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated);
-          lines.push_back(fmt::format("  ROW UTILIZATION: {:.2f}%", utilization));
+    // Confidence statistics
+    if (!stats.row_open_stats.confidenceCounts.empty()) {
+      uint32_t most_used = stats.row_open_stats.getMostUsedConfidenceLevel();
+      uint64_t most_used_count = 0;
+      uint64_t total_count = 0;
+
+      for (const auto& [level, count] : stats.row_open_stats.confidenceCounts) {
+        if (level == most_used)
+          most_used_count = count;
+        total_count += count;
       }
-  
+
+      lines.push_back(fmt::format("  CONFIDENCE LEVELS: MOST USED {} ({:.2f}% of requests)", most_used,
+                                  (total_count > 0) ? 100.0f * static_cast<float>(most_used_count) / static_cast<float>(total_count) : 0.0f));
+
+      // Only print distribution if there are multiple confidence levels used
+      if (stats.row_open_stats.confidenceCounts.size() > 1) {
+        lines.push_back("  CONFIDENCE DISTRIBUTION:");
+        for (const auto& [level, count] : stats.row_open_stats.confidenceCounts) {
+          if (count > 0) {
+            float percentage = (total_count > 0) ? 100.0f * static_cast<float>(count) / static_cast<float>(total_count) : 0.0f;
+            lines.push_back(fmt::format("    LEVEL {}: {:10} ({:.2f}%)", level, count, percentage));
+          }
+        }
+      }
+    }
   }
   return lines;
 }

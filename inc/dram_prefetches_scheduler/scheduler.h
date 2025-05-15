@@ -3,11 +3,11 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
-#include <vector>
+#include <unordered_map>
 
 #include "dram_row.h"
-#include "row_identifier.h"
 #include "prefetch_request.h"
+#include "row_identifier.h"
 #include "scheduler_parameters.h"
 #include "scheduler_stats.h"
 
@@ -17,16 +17,10 @@ namespace dram_open
 class DramRequestScheduler
 {
 private:
-  std::vector<DramRow> dramRows_;
-  SchedulerStats       stats;
+  std::unordered_map<RowIdentifier, DramRow> dramRowsMap_;
+  SchedulerStats stats;
 
   DramRequestScheduler() = default;
-
-  auto findRow(const RowIdentifier& id)
-  {
-    return std::find_if(dramRows_.begin(), dramRows_.end(),
-                       [&id](const DramRow& r){ return r.getRowIdentifier() == id; });
-  }
 
 public:
   static DramRequestScheduler& getInstance()
@@ -35,45 +29,50 @@ public:
     return inst;
   }
 
-  DramRequestScheduler(const DramRequestScheduler&)            = delete;
+  DramRequestScheduler(const DramRequestScheduler&) = delete;
   DramRequestScheduler& operator=(const DramRequestScheduler&) = delete;
 
   bool hasMatchingRow(RowIdentifier rowID, std::uint64_t now)
   {
-    auto it = findRow(rowID);
-    if (it == dramRows_.end()) return false;
-
-    // Use iterator directly
-    if (!it->wasAccessed()) {         
-      ++stats.rowsAccessed;
-      it->markAccessed();
-    }
-
-    std::uint64_t lat = it->recordAccess(now);
+    // Direct hash lookup - O(1)
+    auto it = dramRowsMap_.find(rowID);
+    if (it == dramRowsMap_.end())
+      return false;
 
     ++stats.latestRequestsObserved;
-    stats.totalLatencyLatestRequest += lat;
+
+    if (!it->second.wasAccessed()) {
+      std::uint64_t lat = it->second.recordAccess(now);
+      ++stats.rowsAccessed;
+      stats.totalLatencyLatestRequest += lat;
+      it->second.markAccessed();
+    }
 
     return true;
   }
 
   bool addPrefetchRequest(RowIdentifier rowID, champsim::address addr, std::uint32_t conf, std::uint64_t now)
   {
+    stats.recordConfidence(conf);
     auto req = std::make_shared<PrefetchRequest>(addr, conf, now);
-    auto it = findRow(rowID);
 
-    if (it != dramRows_.end()) {
-      if (it->addRequest(req)) { 
-        ++stats.requestsAdded;
-        return true;
-      }
-      ++stats.requestsDroppedDuplicate;
+    auto it = dramRowsMap_.find(rowID);
+
+    if (it == dramRowsMap_.end()) {
+      // New row
+      dramRowsMap_.emplace(rowID, DramRow(rowID, req));
+      ++stats.requestsAdded;
+      ++stats.rowsCreated;
       return true;
     }
 
-    dramRows_.emplace_back(rowID, req);
-    ++stats.requestsAdded;
-    ++stats.rowsCreated;
+    // Existing row
+    if (it->second.addRequest(req)) {
+      ++stats.requestsAdded;
+      return true;
+    }
+
+    ++stats.requestsDroppedDuplicate;
     return true;
   }
 
@@ -81,12 +80,10 @@ public:
   {
     // Reset statistics
     stats.reset();
-    
-    // Account for existing rows in statistics
-    stats.rowsCreated = dramRows_.size();
-    
-    // Reset access flags for all rows
-    for (auto& row : dramRows_) {
+
+    stats.rowsCreated = dramRowsMap_.size();
+
+    for (auto& [id, row] : dramRowsMap_) {
       row.resetAccessedFlag();
     }
   }
