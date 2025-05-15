@@ -45,6 +45,12 @@ public:
     return latestRequest_->get_confidence();
   }
 
+  std::uint32_t getConfidenceLevel() const noexcept
+  {
+    assert(latestRequest_ && "No request recorded");
+    return latestRequest_->get_confidence_level();
+  }
+
   const RowIdentifier& getRowIdentifier() const noexcept { return rowIdentifier_; }
 
   bool wasAccessed()  const noexcept { return accessed_; }

@@ -34,7 +34,8 @@ struct SchedulerStats {
   {
     return rowsAccessed ? static_cast<double>(totalLatencyLatestRequest) / static_cast<double>(rowsAccessed) : 0.0;
   }
-  void recordConfidence(std::uint32_t confidenceLevel) noexcept { confidenceCounts[confidenceLevel]++; }
+  
+  void recordUsefulConfidence(std::uint32_t confidenceLevel) noexcept { confidenceCounts[confidenceLevel]++; }
 
   std::uint32_t getMostUsedConfidenceLevel() const noexcept
   {

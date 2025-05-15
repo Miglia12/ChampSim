@@ -34,7 +34,6 @@ public:
 
   bool hasMatchingRow(RowIdentifier rowID, std::uint64_t now)
   {
-    // Direct hash lookup - O(1)
     auto it = dramRowsMap_.find(rowID);
     if (it == dramRowsMap_.end())
       return false;
@@ -45,6 +44,9 @@ public:
       std::uint64_t lat = it->second.recordAccess(now);
       ++stats.rowsAccessed;
       stats.totalLatencyLatestRequest += lat;
+
+      stats.recordUsefulConfidence(it->second.getConfidenceLevel());
+
       it->second.markAccessed();
     }
 
@@ -53,7 +55,6 @@ public:
 
   bool addPrefetchRequest(RowIdentifier rowID, champsim::address addr, std::uint32_t conf, std::uint64_t now)
   {
-    stats.recordConfidence(conf);
     auto req = std::make_shared<PrefetchRequest>(addr, conf, now);
 
     auto it = dramRowsMap_.find(rowID);

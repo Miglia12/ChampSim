@@ -41,6 +41,8 @@ public:
     return confidence_;
   }
 
+  std::uint32_t get_confidence_level() const noexcept { return static_cast<std::uint32_t>(confidence_ * parameters::MAXIMUM_CONFIDENCE_LEVEL + 0.5f); }
+
   // Compare by block number instead of full address
   bool operator==(const PrefetchRequest& rhs) const noexcept { 
     return champsim::block_number{address_} == champsim::block_number{rhs.address_}; 
