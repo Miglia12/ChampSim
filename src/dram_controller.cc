@@ -189,6 +189,11 @@ long DRAM_CHANNEL::schedule_refresh()
     sim_stats.refresh_cycles++;
     if (refresh_row >= address_mapping.rows())
       refresh_row -= address_mapping.rows();
+
+    // Clear scheduler rows if synchronization is enabled
+    if (dram_open::parameters::SYNC_SCHEDULER_WITH_REFRESH) {
+      dram_open::DramRequestScheduler::getInstance().clearAllRows();
+    }
   }
 
   // go through each bank, and handle refreshes
@@ -506,6 +511,7 @@ void MEMORY_CONTROLLER::initialize()
   fmt::print("  - Perfect Speculative Opening: {}\n", perfect_speculative_opening ? "ENABLED" : "DISABLED");
   fmt::print("  - Row-Buffer-Aware Controller: {}\n", use_row_buffer_aware_controller ? "ENABLED" : "DISABLED");
   fmt::print("  - DRAM_ROW_OPEN_PAYS_TCAS: {}\n", DRAM_ROW_OPEN_PAYS_TCAS ? "ENABLED" : "DISABLED");
+  fmt::print("  - SYNC_SCHEDULER_WITH_REFRESH: {}\n", SYNC_SCHEDULER_WITH_REFRESH ? "ENABLED" : "DISABLED");
 }
 
 void DRAM_CHANNEL::initialize() {}

@@ -13,7 +13,10 @@ inline constexpr std::uint32_t MAXIMUM_CONFIDENCE_LEVEL = 6; // Maximum confiden
 // DRAM Controller parameters
 inline constexpr bool DRAM_ROW_OPEN_PAYS_TCAS = false;        //  Set to true if speculative opens should pay tCAS
 inline constexpr bool use_row_buffer_aware_controller = true; // Controls whether the DRAM controller considers potential row-buffer hits for scheduling
-inline constexpr bool perfect_speculative_opening = false;  // Enables perfect speculative opening mode
+inline constexpr bool perfect_speculative_opening = false;    // Enables perfect speculative opening mode
+
+// Scheduler refresh synchronization
+inline constexpr bool SYNC_SCHEDULER_WITH_REFRESH = true; // When true, clears scheduler rows on DRAM refresh
 
 } // namespace parameters
 } // namespace dram_open

@@ -138,6 +138,8 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
                                     ? 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated)
                                     : 0.0f));
 
+    lines.push_back(fmt::format("  TOTAL ROW ACCESSES: {:10}", stats.row_open_stats.latestRequestsObserved));
+
     // Latency statistics
     double avg_latency = stats.row_open_stats.getAverageReadyToServiceLatency();
     lines.push_back(fmt::format("  AVG PREFETCH-TO-USE LATENCY: {:.2f} cycles", avg_latency));

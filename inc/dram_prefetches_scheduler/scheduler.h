@@ -77,6 +77,13 @@ public:
     return true;
   }
 
+  void clearAllRows()
+  {
+    if (parameters::SYNC_SCHEDULER_WITH_REFRESH) {
+      dramRowsMap_.clear();
+    }
+  }
+
   void resetStats()
   {
     // Reset statistics

@@ -46,6 +46,9 @@ constexpr bool perfect_speculative_opening = dram_open::parameters::perfect_spec
 // Controls whether the DRAM controller considers potential row-buffer hits for scheduling
 constexpr bool use_row_buffer_aware_controller = dram_open::parameters::use_row_buffer_aware_controller;
 
+// When true, clears scheduler rows on DRAM refresh
+constexpr bool SYNC_SCHEDULER_WITH_REFRESH = dram_open::parameters::SYNC_SCHEDULER_WITH_REFRESH;
+
 struct DRAM_ADDRESS_MAPPING {
   constexpr static std::size_t SLICER_OFFSET_IDX = 0;
   constexpr static std::size_t SLICER_CHANNEL_IDX = 1;
