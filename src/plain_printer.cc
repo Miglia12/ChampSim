@@ -170,6 +170,44 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
         }
       }
     }
+
+    // Add histogram data
+    const auto& histogram = stats.row_open_stats.cachedHistogram;
+    if (histogram.getTotalUniqueRows() > 0) {
+      lines.push_back("");
+      lines.push_back("  ROW ACCESS HISTOGRAM:");
+      lines.push_back(fmt::format("    TOTAL UNIQUE ROWS: {}", histogram.getTotalUniqueRows()));
+      lines.push_back(fmt::format("    TOTAL OPENS: {}", histogram.getTotalOpens()));
+      lines.push_back(fmt::format("    TOTAL ACCESSES: {}", histogram.getTotalAccesses()));
+
+      // Print open histogram
+      lines.push_back("");
+      lines.push_back("    OPENS PER ROW DISTRIBUTION:");
+      lines.push_back("    Range       Rows    Total Opens    Avg Opens/Row");
+      lines.push_back("    -------     ----    -----------    -------------");
+      // Note: For plain text output, we only show non-zero buckets for readability
+      // JSON output always includes all buckets for consistent automated parsing
+      for (const auto& bucket : histogram.openHistogram.getBuckets()) {
+        if (bucket.rowCount > 0) {
+          lines.push_back(
+              fmt::format("    {:<10} {:>6} {:>13} {:>15.2f}", bucket.getRangeString(), bucket.rowCount, bucket.totalValue, bucket.getAverageValue()));
+        }
+      }
+
+      // Print access histogram
+      lines.push_back("");
+      lines.push_back("    ACCESSES PER ROW DISTRIBUTION:");
+      lines.push_back("    Range       Rows    Total Accesses  Avg Accesses/Row");
+      lines.push_back("    -------     ----    --------------  ----------------");
+      // Note: For plain text output, we only show non-zero buckets for readability
+      // JSON output always includes all buckets for consistent automated parsing
+      for (const auto& bucket : histogram.accessHistogram.getBuckets()) {
+        if (bucket.rowCount > 0) {
+          lines.push_back(
+              fmt::format("    {:<10} {:>6} {:>15} {:>17.2f}", bucket.getRangeString(), bucket.rowCount, bucket.totalValue, bucket.getAverageValue()));
+        }
+      }
+    }
   }
   return lines;
 }

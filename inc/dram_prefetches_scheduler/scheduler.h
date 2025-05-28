@@ -8,6 +8,7 @@
 #include "dram_row.h"
 #include "prefetch_request.h"
 #include "row_identifier.h"
+#include "scheduler_histogram.h"
 #include "scheduler_parameters.h"
 #include "scheduler_stats.h"
 
@@ -41,11 +42,13 @@ public:
     ++stats.latestRequestsObserved;
 
     if (!it->second.wasAccessed()) {
-      std::uint64_t lat = it->second.recordAccess(now);
-      ++stats.rowsAccessed;
-      stats.totalLatencyLatestRequest += lat;
+      // Get all the data we need
+      std::uint64_t latency = it->second.recordAccess(now);
+      std::uint32_t confidence = it->second.getConfidenceLevel();
 
-      stats.recordUsefulConfidence(it->second.getConfidenceLevel());
+      // Update stats in one coordinated way
+      stats.recordRowAccess(rowID);
+      stats.recordAccessLatency(latency, confidence);
 
       it->second.markAccessed();
     }
@@ -62,18 +65,21 @@ public:
     if (it == dramRowsMap_.end()) {
       // New row
       dramRowsMap_.emplace(rowID, DramRow(rowID, req));
-      ++stats.requestsAdded;
-      ++stats.rowsCreated;
+
+      // Update stats
+      stats.recordRowOpen(rowID);
+      stats.recordRequestAdded();
+
       return true;
     }
 
-    // Existing row
+    // Existing row - just add the request
     if (it->second.addRequest(req)) {
-      ++stats.requestsAdded;
+      stats.recordRequestAdded();
       return true;
     }
 
-    ++stats.requestsDroppedDuplicate;
+    stats.recordRequestDropped();
     return true;
   }
 
@@ -86,17 +92,30 @@ public:
 
   void resetStats()
   {
-    // Reset statistics
+    // Reset all statistics
     stats.reset();
 
-    stats.rowsCreated = dramRowsMap_.size();
-
     for (auto& [id, row] : dramRowsMap_) {
+      stats.recordRowOpen(id);
       row.resetAccessedFlag();
     }
   }
 
   const SchedulerStats& getStats() const noexcept { return stats; }
+
+  RowAccessHistogram computeRowAccessHistogram() const
+  {
+    RowAccessHistogram histogram;
+
+    for (const auto& [rowId, history] : stats.rowHistory) {
+      histogram.openHistogram.addValue(history.openCount);
+      histogram.accessHistogram.addValue(history.accessCount);
+    }
+
+    assert(histogram.accessHistogram.getTotalRows() == histogram.openHistogram.getTotalRows() && "The size of the two istograms should be the same");
+
+    return histogram;
+  }
 };
 
 } // namespace dram_open

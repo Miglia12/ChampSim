@@ -16,7 +16,10 @@ inline constexpr bool use_row_buffer_aware_controller = true; // Controls whethe
 inline constexpr bool perfect_speculative_opening = false;    // Enables perfect speculative opening mode
 
 // Scheduler refresh synchronization
-inline constexpr bool SYNC_SCHEDULER_WITH_REFRESH = true; // When true, clears scheduler rows on DRAM refresh
+inline constexpr bool SYNC_SCHEDULER_WITH_REFRESH = false; // When true, clears scheduler rows on DRAM refresh
+
+// Number of power-of-2 buckets (excluding the 0 bucket)
+inline constexpr std::size_t HISTOGRAM_BUCKETS = 10; // Total buckets = 1 (for 0) + POWER_OF_TWO_HISTOGRAM_BUCKETS
 
 } // namespace parameters
 } // namespace dram_open

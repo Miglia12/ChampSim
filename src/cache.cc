@@ -1010,6 +1010,10 @@ void CACHE::end_phase(unsigned finished_cpu)
 
   if (NAME == "LLC" && dram_request_scheduler && cpu == 0 && !warmup) {
     roi_stats.row_open_stats = dram_request_scheduler->getStats();
+
+    // Compute and cache the histogram
+    auto histogram = dram_request_scheduler->computeRowAccessHistogram();
+    roi_stats.row_open_stats.computeAndCacheHistogram(histogram);
   }
 }
 

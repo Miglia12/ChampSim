@@ -97,8 +97,41 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
       uint32_t most_used = stats.row_open_stats.getMostUsedConfidenceLevel();
       statsmap.emplace("ROW_PREFETCH_MOST_USED_CONFIDENCE", most_used);
     }
-  }
 
+    // Add histogram data in Python-friendly format
+    const auto& histogram = stats.row_open_stats.cachedHistogram;
+
+    // Create arrays for open histogram - ALWAYS include all buckets
+    nlohmann::json open_histogram_data = nlohmann::json::array();
+    for (const auto& bucket : histogram.openHistogram.getBuckets()) {
+      open_histogram_data.push_back({{"range", bucket.getRangeString()},
+                                     {"min_value", bucket.minValue},
+                                     {"max_value", bucket.maxValue == UINT64_MAX ? -1 : static_cast<int64_t>(bucket.maxValue)},
+                                     {"row_count", bucket.rowCount},
+                                     {"total_opens", bucket.totalValue},
+                                     {"avg_opens", bucket.getAverageValue()}});
+    }
+
+    // Create arrays for access histogram - ALWAYS include all buckets
+    nlohmann::json access_histogram_data = nlohmann::json::array();
+    for (const auto& bucket : histogram.accessHistogram.getBuckets()) {
+      access_histogram_data.push_back({{"range", bucket.getRangeString()},
+                                       {"min_value", bucket.minValue},
+                                       {"max_value", bucket.maxValue == UINT64_MAX ? -1 : static_cast<int64_t>(bucket.maxValue)},
+                                       {"row_count", bucket.rowCount},
+                                       {"total_accesses", bucket.totalValue},
+                                       {"avg_accesses", bucket.getAverageValue()}});
+    }
+
+    // Add histogram summary statistics
+    nlohmann::json histogram_summary = {{"total_unique_rows", histogram.getTotalUniqueRows()},
+                                        {"total_opens", histogram.getTotalOpens()},
+                                        {"total_accesses", histogram.getTotalAccesses()},
+                                        {"opens_histogram", open_histogram_data},
+                                        {"accesses_histogram", access_histogram_data}};
+
+    statsmap.emplace("ROW_PREFETCH_HISTOGRAM", histogram_summary);
+  }
   j = statsmap;
 }
 
