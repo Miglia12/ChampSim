@@ -49,6 +49,9 @@ constexpr bool use_row_buffer_aware_controller = dram_open::parameters::use_row_
 // When true, clears scheduler rows on DRAM refresh
 constexpr bool SYNC_SCHEDULER_WITH_REFRESH = dram_open::parameters::SYNC_SCHEDULER_WITH_REFRESH;
 
+// Controls whether scheduler hits are only marked as useful when target bank is idle
+constexpr bool ENFORCE_BANK_IDLE_CONSTRAINT = dram_open::parameters::ENFORCE_BANK_IDLE_CONSTRAINT;
+
 struct DRAM_ADDRESS_MAPPING {
   constexpr static std::size_t SLICER_OFFSET_IDX = 0;
   constexpr static std::size_t SLICER_CHANNEL_IDX = 1;

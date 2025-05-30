@@ -432,21 +432,23 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   }
 
   // Determine request types
-  bool is_load_or_prefetch = pkt->value().type == access_type::LOAD || pkt->value().type == access_type::PREFETCH;
   bool is_speculative_open = pkt->value().type == access_type::DRAM_ROW_OPEN;
 
-  assert(!is_speculative_open && "In this version speculative open requets should not be generated");
+  assert(!is_speculative_open && "In this version speculative open requests should not be generated");
 
-  // Only check scheduler if there's no physical hit and this is a demand access
-  bool scheduler_row_hit = false;
-  if (!row_buffer_hit && is_load_or_prefetch) {
-    uint64_t current_cycle = CACHE::get_llc_cycle();
-    auto row_id = MEMORY_CONTROLLER::get_row_identifier(pkt->value().address);
-    scheduler_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(row_id, current_cycle);
+  bool table_row_hit = false;
+  dram_open::RowIdentifier row_id;
+  if (!row_buffer_hit && !is_speculative_open) {
+    row_id = MEMORY_CONTROLLER::get_row_identifier(pkt->value().address);
+    table_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(row_id);
   }
 
+  // Determine if scheduler hit is actually useful
+  bool bank_is_idle = !bank_request[op_idx].open_row.has_value();
+  bool table_usefull = table_row_hit && (bank_is_idle || !dram_open::parameters::ENFORCE_BANK_IDLE_CONSTRAINT);
+
   // Determine if we should skip activation delay
-  bool skip_activation = row_buffer_hit || (scheduler_row_hit && is_load_or_prefetch) || (perfect_speculative_opening && is_load_or_prefetch);
+  bool skip_activation = row_buffer_hit || (table_usefull && !is_speculative_open) || (perfect_speculative_opening && !is_speculative_open);
 
   // Calculate delays
   champsim::chrono::clock::duration activation_delay =
@@ -474,6 +476,12 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   // Propagate the speculative flag
   if (!is_speculative_open && was_spec_open) {
     bank_request[op_idx].opened_speculatively = true;
+  }
+
+  // Mark scheduler row as used only if it was actually beneficial
+  if (table_usefull && !is_speculative_open) {
+    uint64_t current_cycle = CACHE::get_llc_cycle();
+    dram_open::DramRequestScheduler::getInstance().markRowUsed(row_id, current_cycle);
   }
 
   if (is_speculative_open) {
@@ -507,11 +515,16 @@ void MEMORY_CONTROLLER::initialize()
   fmt::print("[MEM] Setting static pointer to {}\n", static_cast<void*>(this));
   dram_controller_static = this;
 
-  fmt::print("DRAM Controller Configuration:\n");
-  fmt::print("  - Perfect Speculative Opening: {}\n", perfect_speculative_opening ? "ENABLED" : "DISABLED");
-  fmt::print("  - Row-Buffer-Aware Controller: {}\n", use_row_buffer_aware_controller ? "ENABLED" : "DISABLED");
-  fmt::print("  - DRAM_ROW_OPEN_PAYS_TCAS: {}\n", DRAM_ROW_OPEN_PAYS_TCAS ? "ENABLED" : "DISABLED");
-  fmt::print("  - SYNC_SCHEDULER_WITH_REFRESH: {}\n", SYNC_SCHEDULER_WITH_REFRESH ? "ENABLED" : "DISABLED");
+  fmt::print("=== CONTROLLER FEATURES ===\n");
+  fmt::print("Perfect Speculative Opening    : {}\n", perfect_speculative_opening ? "ENABLED" : "DISABLED");
+  fmt::print("Row-Buffer-Aware Controller    : {}\n", use_row_buffer_aware_controller ? "ENABLED" : "DISABLED");
+  fmt::print("DRAM Row Open Pays tCAS        : {}\n", DRAM_ROW_OPEN_PAYS_TCAS ? "ENABLED" : "DISABLED");
+  fmt::print("\n");
+
+  fmt::print("=== SCHEDULER CONFIGURATION ===\n");
+  fmt::print("Sync with Refresh Cycles       : {}\n", SYNC_SCHEDULER_WITH_REFRESH ? "ENABLED" : "DISABLED");
+  fmt::print("Enforce Bank Idle Constraint   : {}\n", ENFORCE_BANK_IDLE_CONSTRAINT ? "ENABLED" : "DISABLED");
+  fmt::print("\n");
 }
 
 void DRAM_CHANNEL::initialize() {}

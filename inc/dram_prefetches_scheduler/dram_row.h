@@ -2,8 +2,8 @@
 #include <cassert>
 #include <memory>
 
-#include "row_identifier.h"
 #include "prefetch_request.h"
+#include "row_identifier.h"
 
 namespace dram_open
 {
@@ -13,8 +13,7 @@ class DramRow
 public:
   DramRow() = default;
 
-  DramRow(const RowIdentifier& id, PrefetchRequestPtr req)
-      : rowIdentifier_{id}, latestRequest_{std::move(req)} 
+  DramRow(const RowIdentifier& id, PrefetchRequestPtr req) : rowIdentifier_{id}, latestRequest_{std::move(req)}
   {
     assert(latestRequest_ && "Initial request must be non-null");
   }
@@ -26,10 +25,10 @@ public:
 
     // Check if this is a duplicate (same block number)
     bool is_duplicate = (*latestRequest_ == *req);
-    
+
     // Always update the latest request regardless
     latestRequest_ = std::move(req);
-    
+
     // Return false for duplicates (for counting)
     return !is_duplicate;
   }
@@ -40,7 +39,8 @@ public:
     return latestRequest_->get_delay(cycle);
   }
 
-  float getConfidence() const noexcept {
+  float getConfidence() const noexcept
+  {
     assert(latestRequest_ && "No request recorded");
     return latestRequest_->get_confidence();
   }
@@ -53,14 +53,9 @@ public:
 
   const RowIdentifier& getRowIdentifier() const noexcept { return rowIdentifier_; }
 
-  bool wasAccessed()  const noexcept { return accessed_; }
-  void markAccessed()       noexcept { accessed_ = true; }
-  void resetAccessedFlag()  noexcept { accessed_ = false; }
-
 private:
-  RowIdentifier       rowIdentifier_{};
-  PrefetchRequestPtr  latestRequest_{};
-  bool                accessed_{false};
+  RowIdentifier rowIdentifier_{};
+  PrefetchRequestPtr latestRequest_{};
 };
 
 } // namespace dram_open

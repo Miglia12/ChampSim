@@ -81,18 +81,17 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
     // Row statistics
     statsmap.emplace("ROW_PREFETCH_ROWS_TRACKED", stats.row_open_stats.rowsCreated);
     statsmap.emplace("ROW_PREFETCH_ROWS_ACCESSED", stats.row_open_stats.rowsAccessed);
-    statsmap.emplace("ROW_PREFETCH_ACCESS_COUNT", stats.row_open_stats.latestRequestsObserved);
 
-    // Calculate row utilization
-    if (stats.row_open_stats.rowsCreated > 0) {
-      float utilization = 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated);
-      statsmap.emplace("ROW_PREFETCH_ACCESS_RATIO", utilization);
-    }
+    // Access statistics
+    statsmap.emplace("ROW_PREFETCH_SUCCESSFUL_ACCESSES", stats.row_open_stats.successfulTableAccesses);
+
+    // New metric: average accesses per useful row
+    statsmap.emplace("ROW_PREFETCH_AVG_ACCESSES_PER_USEFUL_ROW", stats.row_open_stats.getAverageAccessesPerUsefulRow());
 
     // Latency statistics
-    statsmap.emplace("ROW_PREFETCH_AVG_LATENCY", stats.row_open_stats.getAverageReadyToServiceLatency());
+    statsmap.emplace("ROW_PREFETCH_AVG_LATENCY_PER_ACCESS", stats.row_open_stats.getAverageLatencyPerAccess());
 
-    // Just the most used confidence level, not the distribution
+    // Confidence statistics
     if (!stats.row_open_stats.confidenceCounts.empty()) {
       uint32_t most_used = stats.row_open_stats.getMostUsedConfidenceLevel();
       statsmap.emplace("ROW_PREFETCH_MOST_USED_CONFIDENCE", most_used);

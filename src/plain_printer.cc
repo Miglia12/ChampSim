@@ -138,37 +138,21 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
                                     ? 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated)
                                     : 0.0f));
 
-    lines.push_back(fmt::format("  TOTAL ROW ACCESSES: {:10}", stats.row_open_stats.latestRequestsObserved));
+    // Access statistics - updated for new structure
+    lines.push_back(fmt::format("  SUCCESSFUL TABLE ACCESSES: {:10}", stats.row_open_stats.successfulTableAccesses));
 
-    // Latency statistics
-    double avg_latency = stats.row_open_stats.getAverageReadyToServiceLatency();
-    lines.push_back(fmt::format("  AVG PREFETCH-TO-USE LATENCY: {:.2f} cycles", avg_latency));
+    // New metric: average accesses per useful row
+    double avg_accesses_per_row = stats.row_open_stats.getAverageAccessesPerUsefulRow();
+    lines.push_back(fmt::format("  AVG ACCESSES PER USEFUL ROW: {:.2f}", avg_accesses_per_row));
 
-    // Confidence statistics
+    // Latency statistics - only the meaningful metric
+    double avg_latency_per_access = stats.row_open_stats.getAverageLatencyPerAccess();
+    lines.push_back(fmt::format("  AVG PREFETCH-TO-USE LATENCY: {:.2f} cycles/access", avg_latency_per_access));
+
+    // Confidence statistics - simplified
     if (!stats.row_open_stats.confidenceCounts.empty()) {
       uint32_t most_used = stats.row_open_stats.getMostUsedConfidenceLevel();
-      uint64_t most_used_count = 0;
-      uint64_t total_count = 0;
-
-      for (const auto& [level, count] : stats.row_open_stats.confidenceCounts) {
-        if (level == most_used)
-          most_used_count = count;
-        total_count += count;
-      }
-
-      lines.push_back(fmt::format("  CONFIDENCE LEVELS: MOST USED {} ({:.2f}% of requests)", most_used,
-                                  (total_count > 0) ? 100.0f * static_cast<float>(most_used_count) / static_cast<float>(total_count) : 0.0f));
-
-      // Only print distribution if there are multiple confidence levels used
-      if (stats.row_open_stats.confidenceCounts.size() > 1) {
-        lines.push_back("  CONFIDENCE DISTRIBUTION:");
-        for (const auto& [level, count] : stats.row_open_stats.confidenceCounts) {
-          if (count > 0) {
-            float percentage = (total_count > 0) ? 100.0f * static_cast<float>(count) / static_cast<float>(total_count) : 0.0f;
-            lines.push_back(fmt::format("    LEVEL {}: {:10} ({:.2f}%)", level, count, percentage));
-          }
-        }
-      }
+      lines.push_back(fmt::format("  MOST USED CONFIDENCE LEVEL: {}", most_used));
     }
   }
   return lines;
