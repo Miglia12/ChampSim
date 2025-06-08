@@ -448,8 +448,8 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   bool table_usefull = table_row_hit && (bank_is_idle || !dram_open::parameters::ENFORCE_BANK_IDLE_CONSTRAINT);
 
   // Determine if we should skip activation delay
-  bool skip_activation = row_buffer_hit || (table_usefull && !is_speculative_open) || (perfect_speculative_opening && !is_speculative_open);
-
+  bool skip_activation = row_buffer_hit || (table_usefull && !is_speculative_open)
+                         || (perfect_speculative_opening && !is_speculative_open && pkt->value().type == access_type::LOAD);
   // Calculate delays
   champsim::chrono::clock::duration activation_delay =
       skip_activation ? champsim::chrono::clock::duration{} : (bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD);
