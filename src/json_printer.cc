@@ -120,6 +120,11 @@ void to_json(nlohmann::json& j, const DRAM_CHANNEL::stats_type stats)
                                                        {"BANK_CONFLICTS", stats.DRAM_ROW_OPEN_BANK_CONFLICT},
                                                        {"USEFUL_RATIO", useful_ratio}};
   }
+  
+  // Perfect speculation statistics
+  if (perfect_speculative_opening && stats.PERFECT_SPEC_ROW_BUFFER_HITS > 0) {
+    json_obj["PERFECT_SPECULATION_ROW_BUFFER_HITS"] = stats.PERFECT_SPEC_ROW_BUFFER_HITS;
+  }
 
   j = json_obj;
 }

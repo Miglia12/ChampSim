@@ -447,9 +447,16 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   bool bank_is_idle = !bank_request[op_idx].open_row.has_value();
   bool table_usefull = table_row_hit && (bank_is_idle || !dram_open::parameters::ENFORCE_BANK_IDLE_CONSTRAINT);
 
+  // Check if perfect speculative opening is helping
+  bool perfect_spec_helped = false;
+  if (!row_buffer_hit && pkt->value().type == access_type::LOAD && perfect_speculative_opening) {
+    perfect_spec_helped = true;
+    ++sim_stats.PERFECT_SPEC_ROW_BUFFER_HITS;
+  }
+
   // Determine if we should skip activation delay
-  bool skip_activation = row_buffer_hit || (table_usefull && !is_speculative_open)
-                         || (perfect_speculative_opening && !is_speculative_open && pkt->value().type == access_type::LOAD);
+  bool skip_activation = row_buffer_hit || (table_usefull && !is_speculative_open) || perfect_spec_helped;
+
   // Calculate delays
   champsim::chrono::clock::duration activation_delay =
       skip_activation ? champsim::chrono::clock::duration{} : (bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD);

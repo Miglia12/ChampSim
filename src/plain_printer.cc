@@ -168,7 +168,7 @@ std::vector<std::string> champsim::plain_printer::format(DRAM_CHANNEL::stats_typ
   lines.push_back(fmt::format("  ROW_BUFFER_MISS: {:10}", stats.WQ_ROW_BUFFER_MISS));
   lines.push_back(fmt::format("  FULL: {:10}", stats.WQ_FULL));
 
-  // Add speculative DRAM row open statistics
+  // Speculative DRAM row open statistics
   if (stats.DRAM_ROW_OPEN_REQUESTS > 0) {
     lines.push_back(fmt::format("{} SPECULATIVE ROW OPENS: {:10}", stats.name, stats.DRAM_ROW_OPEN_REQUESTS));
     lines.push_back(fmt::format("  USEFUL OPENS: {:10}", stats.DRAM_ROW_OPEN_USEFUL));
@@ -178,6 +178,11 @@ std::vector<std::string> champsim::plain_printer::format(DRAM_CHANNEL::stats_typ
     }
     lines.push_back(
         fmt::format("  USEFUL RATIO: {:.2f}%", 100.0f * static_cast<float>(stats.DRAM_ROW_OPEN_USEFUL) / static_cast<float>(stats.DRAM_ROW_OPEN_REQUESTS)));
+  }
+
+  // Perfect speculation statistics when enabled
+  if (perfect_speculative_opening && stats.PERFECT_SPEC_ROW_BUFFER_HITS > 0) {
+    lines.push_back(fmt::format("{} PERFECT SPECULATION ROW BUFFER HITS: {:10}", stats.name, stats.PERFECT_SPEC_ROW_BUFFER_HITS));
   }
 
   if (stats.refresh_cycles > 0)

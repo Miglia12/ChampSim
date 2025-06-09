@@ -14,6 +14,7 @@ dram_stats operator-(dram_stats lhs, dram_stats rhs)
   lhs.DRAM_ROW_OPEN_USEFUL -= rhs.DRAM_ROW_OPEN_USEFUL;
   lhs.DRAM_ROW_OPEN_USELESS -= rhs.DRAM_ROW_OPEN_USELESS;
   lhs.DRAM_ROW_OPEN_BANK_CONFLICT -= rhs.DRAM_ROW_OPEN_BANK_CONFLICT;
+  lhs.PERFECT_SPEC_ROW_BUFFER_HITS -= rhs.PERFECT_SPEC_ROW_BUFFER_HITS;
 
   return lhs;
 }
