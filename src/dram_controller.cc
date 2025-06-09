@@ -438,7 +438,7 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
 
   bool table_row_hit = false;
   dram_open::RowIdentifier row_id;
-  if (!row_buffer_hit && !is_speculative_open) {
+  if (!perfect_speculative_opening && !row_buffer_hit && !is_speculative_open) {
     row_id = MEMORY_CONTROLLER::get_row_identifier(pkt->value().address);
     table_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(row_id);
   }
@@ -449,7 +449,7 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
 
   // Check if perfect speculative opening is helping
   bool perfect_spec_helped = false;
-  if (!row_buffer_hit && pkt->value().type == access_type::LOAD && perfect_speculative_opening) {
+  if (!row_buffer_hit && pkt->value().type == access_type::LOAD && perfect_speculative_opening ) {
     perfect_spec_helped = true;
     ++sim_stats.PERFECT_SPEC_ROW_BUFFER_HITS;
   }
