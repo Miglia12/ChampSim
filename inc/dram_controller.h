@@ -39,10 +39,10 @@
 constexpr bool DRAM_ROW_OPEN_PAYS_TCAS = dram_open::parameters::DRAM_ROW_OPEN_PAYS_TCAS;
 
 // Enables perfect speculative opening mode
-constexpr bool perfect_speculative_opening = dram_open::parameters::use_row_buffer_aware_controller;
+constexpr bool perfect_speculative_opening = dram_open::parameters::perfect_speculative_opening;
 
 // Controls whether the DRAM controller considers potential row-buffer hits for scheduling
-constexpr bool use_row_buffer_aware_controller = dram_open::parameters::perfect_speculative_opening;
+constexpr bool use_row_buffer_aware_controller = dram_open::parameters::use_row_buffer_aware_controller;
 
 struct DRAM_ADDRESS_MAPPING {
   constexpr static std::size_t SLICER_OFFSET_IDX = 0;
