@@ -85,7 +85,7 @@ namespace berti_tri_params
 // DRAM row scheduler configuration
 // Fine-grained confidence levels for DRAM warming (inclusive)
 // Note: These can be any values between 0 and CONFIDENCE_MAX (16)
-#define DRAM_WARM_MIN_CONFIDENCE (5) // Minimum confidence for DRAM warming
+#define DRAM_WARM_MIN_CONFIDENCE (1) // Minimum confidence for DRAM warming
 #define DRAM_WARM_MAX_CONFIDENCE (6) // Maximum confidence for DRAM warming
 
 } // namespace berti_tri_params

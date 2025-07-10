@@ -488,7 +488,7 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   // Mark scheduler row as used only if it was actually beneficial
   if (table_usefull && !is_speculative_open) {
     uint64_t current_cycle = CACHE::get_llc_cycle();
-    dram_open::DramRequestScheduler::getInstance().markRowUsed(row_id, current_cycle);
+    dram_open::DramRequestScheduler::getInstance().markRowUsed(row_id, current_cycle, pkt->value().type);
   }
 
   if (is_speculative_open) {

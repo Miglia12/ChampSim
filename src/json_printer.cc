@@ -72,8 +72,6 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
   }
 
   if (stats.name == "LLC" && stats.row_open_stats.requestsAdded > 0) {
-    // Create flat structure for better dotted notation access
-
     // Request statistics
     statsmap.emplace("ROW_PREFETCH_REQUESTS_TOTAL", stats.row_open_stats.requestsAdded);
     statsmap.emplace("ROW_PREFETCH_REQUESTS_DUPLICATE", stats.row_open_stats.requestsDroppedDuplicate);
@@ -82,13 +80,13 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
     statsmap.emplace("ROW_PREFETCH_ROWS_TRACKED", stats.row_open_stats.rowsCreated);
     statsmap.emplace("ROW_PREFETCH_ROWS_ACCESSED", stats.row_open_stats.rowsAccessed);
 
-    // Access statistics
+    // Access statistics - coherent naming
     statsmap.emplace("ROW_PREFETCH_SUCCESSFUL_ACCESSES", stats.row_open_stats.successfulTableAccesses);
+    statsmap.emplace("ROW_PREFETCH_SUCCESSFUL_ACCESSES_LOADS", stats.row_open_stats.successfulTableAccessesLoads);
+    statsmap.emplace("ROW_PREFETCH_SUCCESSFUL_ACCESSES_PREFETCHES", stats.row_open_stats.successfulTableAccessesPrefetches);
 
-    // New metric: average accesses per useful row
+    // Derived metrics
     statsmap.emplace("ROW_PREFETCH_AVG_ACCESSES_PER_USEFUL_ROW", stats.row_open_stats.getAverageAccessesPerUsefulRow());
-
-    // Latency statistics
     statsmap.emplace("ROW_PREFETCH_AVG_LATENCY_PER_ACCESS", stats.row_open_stats.getAverageLatencyPerAccess());
 
     // Confidence statistics

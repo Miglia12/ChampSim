@@ -17,6 +17,9 @@ struct SchedulerStats {
   std::uint64_t rowsCreated = 0;
   std::uint64_t rowsAccessed = 0;
 
+  std::uint64_t successfulTableAccessesLoads = 0;
+  std::uint64_t successfulTableAccessesPrefetches = 0;
+
   std::map<std::uint32_t, std::uint64_t> confidenceCounts;
 
   void reset()
@@ -27,6 +30,8 @@ struct SchedulerStats {
     totalLatencyLatestRequest = 0;
     rowsCreated = 0;
     rowsAccessed = 0;
+    successfulTableAccessesLoads = 0;
+    successfulTableAccessesPrefetches = 0;
     confidenceCounts.clear();
   }
 
@@ -42,7 +47,7 @@ struct SchedulerStats {
     return maxElement->first;
   }
 
-  // Additional useful metrics
+  // Additional metrics
   double getTableHitRate() const noexcept { return rowsCreated ? static_cast<double>(rowsAccessed) / static_cast<double>(rowsCreated) : 0.0; }
 
   double getAverageAccessesPerUsefulRow() const noexcept
@@ -54,5 +59,6 @@ struct SchedulerStats {
   {
     return successfulTableAccesses ? static_cast<double>(totalLatencyLatestRequest) / static_cast<double>(successfulTableAccesses) : 0.0;
   }
+
 };
 } // namespace dram_open

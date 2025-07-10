@@ -5,6 +5,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include "access_type.h"
 #include "dram_row.h"
 #include "prefetch_request.h"
 #include "row_identifier.h"
@@ -36,15 +37,15 @@ public:
   DramRequestScheduler(const DramRequestScheduler&) = delete;
   DramRequestScheduler& operator=(const DramRequestScheduler&) = delete;
 
-  // Simple query for matching row - no stats updated
+  // Simple query for matching row
   bool hasMatchingRow(RowIdentifier rowID)
   {
     auto it = dramRowsMap_.find(rowID);
     return (it != dramRowsMap_.end());
   }
 
-  // Mark row as actually used - only called when genuinely beneficial
-  void markRowUsed(RowIdentifier rowID, std::uint64_t now)
+  // Mark row as actually used
+  void markRowUsed(RowIdentifier rowID, std::uint64_t now, access_type type)
   {
     auto it = dramRowsMap_.find(rowID);
     if (it != dramRowsMap_.end()) {
@@ -53,6 +54,13 @@ public:
       // Update statistics for successful table access
       ++stats.successfulTableAccesses;
       stats.totalLatencyLatestRequest += lat;
+
+      if (type == access_type::LOAD) {
+        ++stats.successfulTableAccessesLoads;
+      } else if (type == access_type::PREFETCH) {
+        ++stats.successfulTableAccessesPrefetches;
+      }
+
       stats.recordUsefulConfidence(it->second.getConfidenceLevel());
 
       // Update simulation-wide tracking

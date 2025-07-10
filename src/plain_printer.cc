@@ -127,29 +127,24 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   if (stats.name == "LLC" && stats.row_open_stats.requestsAdded > 0) {
     lines.push_back(fmt::format("{} DRAM ROW BUFFER PREFETCH SCHEDULER:", stats.name));
 
-    // Request tracking statistics
-    lines.push_back(fmt::format("  PREFETCH REQUESTS: {:10} DROPPED (DUPLICATE): {:10}", stats.row_open_stats.requestsAdded,
-                                stats.row_open_stats.requestsDroppedDuplicate));
+    // Request statistics
+    lines.push_back(fmt::format("  PREFETCH REQUESTS TOTAL: {:10}", stats.row_open_stats.requestsAdded));
+    lines.push_back(fmt::format("  PREFETCH REQUESTS DUPLICATE: {:10}", stats.row_open_stats.requestsDroppedDuplicate));
 
-    // Row tracking statistics
-    lines.push_back(fmt::format("  ROWS TRACKED: {:10} ACCESSED: {:10} ACCESS RATIO: {:.2f}%", stats.row_open_stats.rowsCreated,
-                                stats.row_open_stats.rowsAccessed,
-                                (stats.row_open_stats.rowsCreated > 0)
-                                    ? 100.0f * static_cast<float>(stats.row_open_stats.rowsAccessed) / static_cast<float>(stats.row_open_stats.rowsCreated)
-                                    : 0.0f));
+    // Row statistics
+    lines.push_back(fmt::format("  ROWS TRACKED: {:10}", stats.row_open_stats.rowsCreated));
+    lines.push_back(fmt::format("  ROWS ACCESSED: {:10}", stats.row_open_stats.rowsAccessed));
 
-    // Access statistics - updated for new structure
-    lines.push_back(fmt::format("  SUCCESSFUL TABLE ACCESSES: {:10}", stats.row_open_stats.successfulTableAccesses));
+    // Access statistics - coherent naming
+    lines.push_back(fmt::format("  SUCCESSFUL ACCESSES: {:10}", stats.row_open_stats.successfulTableAccesses));
+    lines.push_back(fmt::format("  SUCCESSFUL ACCESSES (LOADS): {:10}", stats.row_open_stats.successfulTableAccessesLoads));
+    lines.push_back(fmt::format("  SUCCESSFUL ACCESSES (PREFETCHES): {:10}", stats.row_open_stats.successfulTableAccessesPrefetches));
 
-    // New metric: average accesses per useful row
-    double avg_accesses_per_row = stats.row_open_stats.getAverageAccessesPerUsefulRow();
-    lines.push_back(fmt::format("  AVG ACCESSES PER USEFUL ROW: {:.2f}", avg_accesses_per_row));
+    // Derived metrics
+    lines.push_back(fmt::format("  AVG ACCESSES PER USEFUL ROW: {:.2f}", stats.row_open_stats.getAverageAccessesPerUsefulRow()));
+    lines.push_back(fmt::format("  AVG LATENCY PER ACCESS: {:.2f} cycles", stats.row_open_stats.getAverageLatencyPerAccess()));
 
-    // Latency statistics - only the meaningful metric
-    double avg_latency_per_access = stats.row_open_stats.getAverageLatencyPerAccess();
-    lines.push_back(fmt::format("  AVG PREFETCH-TO-USE LATENCY: {:.2f} cycles/access", avg_latency_per_access));
-
-    // Confidence statistics - simplified
+    // Confidence statistics
     if (!stats.row_open_stats.confidenceCounts.empty()) {
       uint32_t most_used = stats.row_open_stats.getMostUsedConfidenceLevel();
       lines.push_back(fmt::format("  MOST USED CONFIDENCE LEVEL: {}", most_used));
