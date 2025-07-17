@@ -190,10 +190,7 @@ long DRAM_CHANNEL::schedule_refresh()
     if (refresh_row >= address_mapping.rows())
       refresh_row -= address_mapping.rows();
 
-    // Clear scheduler rows if synchronization is enabled
-    if (dram_open::parameters::SYNC_SCHEDULER_WITH_REFRESH) {
-      dram_open::DramRequestScheduler::getInstance().clearAllRows();
-    }
+    dram_open::DramRequestScheduler::getInstance().clearAllRows();
   }
 
   // go through each bank, and handle refreshes

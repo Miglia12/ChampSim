@@ -27,6 +27,22 @@ private:
 
   DramRequestScheduler() = default;
 
+  // Helper function to check if two rows are in the same bank
+  bool areSameBank(const RowIdentifier& row1, const RowIdentifier& row2) const
+  {
+    return row1.channel == row2.channel && row1.rank == row2.rank && row1.bankGroup == row2.bankGroup && row1.bank == row2.bank;
+  }
+
+  // Reset consecutive accesses for all rows in the same bank except the specified row
+  void resetBankConsecutiveAccesses(const RowIdentifier& accessedRow, bool resetAll = false)
+  {
+    for (auto& [rowID, dramRow] : dramRowsMap_) {
+      if (resetAll || (areSameBank(rowID, accessedRow) && rowID != accessedRow)) {
+        dramRow.resetConsecutiveAccesses();
+      }
+    }
+  }
+
 public:
   static DramRequestScheduler& getInstance()
   {
@@ -37,11 +53,18 @@ public:
   DramRequestScheduler(const DramRequestScheduler&) = delete;
   DramRequestScheduler& operator=(const DramRequestScheduler&) = delete;
 
-  // Simple query for matching row
+  // Query for matching row with consecutive access side effects
   bool hasMatchingRow(RowIdentifier rowID)
   {
     auto it = dramRowsMap_.find(rowID);
-    return (it != dramRowsMap_.end());
+    bool found = (it != dramRowsMap_.end());
+
+    if (!found) {
+      // Row not in table - reset all consecutive counters for rows in this bank
+      resetBankConsecutiveAccesses(rowID, false);
+    }
+
+    return found;
   }
 
   // Mark row as actually used
@@ -50,6 +73,23 @@ public:
     auto it = dramRowsMap_.find(rowID);
     if (it != dramRowsMap_.end()) {
       std::uint64_t lat = it->second.recordAccess(now);
+
+      // Reset consecutive accesses for all OTHER rows in this bank
+      resetBankConsecutiveAccesses(rowID, false);
+
+      // printf("[DEBUG] Row %lu:%lu:%lu:%lu:%lu marked used, consecutive=%lu\n", rowID.channel, rowID.rank, rowID.bankGroup, rowID.bank, rowID.row,
+      //        it->second.getConsecutiveAccesses());
+
+      // Increment consecutive access counter for this row
+      it->second.incrementConsecutiveAccesses();
+
+      // printf("[DEBUG] Row %lu:%lu:%lu:%lu:%lu marked used, consecutive=%lu\n", rowID.channel, rowID.rank, rowID.bankGroup, rowID.bank, rowID.row,
+      //        it->second.getConsecutiveAccesses());
+
+      // If this is at least the second consecutive access, count it
+      if (it->second.getConsecutiveAccesses() >= 2) {
+        ++stats.totalConsecutiveAccesses;
+      }
 
       // Update statistics for successful table access
       ++stats.successfulTableAccesses;
@@ -102,9 +142,12 @@ public:
 
   void clearAllRows()
   {
+    // Reset all consecutive access counters
+    for (auto& [rowID, dramRow] : dramRowsMap_) {
+      dramRow.resetConsecutiveAccesses();
+    }
     if (parameters::SYNC_SCHEDULER_WITH_REFRESH) {
       dramRowsMap_.clear();
-      // printf("[SCHEDULER DEBUG] Refresh cleared %zu rows from working map, tracking map still has %zu unique rows\n", cleared_count, rowUsageTracking_.size());
     }
   }
 
@@ -126,10 +169,6 @@ public:
     stats.rowsCreated = rowUsageTracking_.size(); // All rows ever tracked
     stats.rowsAccessed =
         std::count_if(rowUsageTracking_.begin(), rowUsageTracking_.end(), [](const auto& pair) { return pair.second.first; }); // Only useful rows
-
-    // Debug: Final statistics
-    // printf("[SCHEDULER DEBUG] Final stats: %zu unique rows tracked, %zu useful rows, working map has %zu rows\n", stats.rowsCreated, stats.rowsAccessed,
-          //  dramRowsMap_.size());
 
     return stats;
   }

@@ -134,6 +134,7 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
     // Row statistics
     lines.push_back(fmt::format("  ROWS TRACKED: {:10}", stats.row_open_stats.rowsCreated));
     lines.push_back(fmt::format("  ROWS ACCESSED: {:10}", stats.row_open_stats.rowsAccessed));
+    lines.push_back(fmt::format("  SUCCESSFUL CONSECUTIVE ACCESSES: {:10}", stats.row_open_stats.totalConsecutiveAccesses));
 
     // Access statistics - coherent naming
     lines.push_back(fmt::format("  SUCCESSFUL ACCESSES: {:10}", stats.row_open_stats.successfulTableAccesses));

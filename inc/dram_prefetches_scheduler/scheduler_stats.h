@@ -20,6 +20,8 @@ struct SchedulerStats {
   std::uint64_t successfulTableAccessesLoads = 0;
   std::uint64_t successfulTableAccessesPrefetches = 0;
 
+  std::uint64_t totalConsecutiveAccesses = 0;
+
   std::map<std::uint32_t, std::uint64_t> confidenceCounts;
 
   void reset()
@@ -32,6 +34,7 @@ struct SchedulerStats {
     rowsAccessed = 0;
     successfulTableAccessesLoads = 0;
     successfulTableAccessesPrefetches = 0;
+    totalConsecutiveAccesses = 0;
     confidenceCounts.clear();
   }
 
@@ -60,5 +63,9 @@ struct SchedulerStats {
     return successfulTableAccesses ? static_cast<double>(totalLatencyLatestRequest) / static_cast<double>(successfulTableAccesses) : 0.0;
   }
 
+  double getConsecutiveAccessRate() const noexcept
+  {
+    return successfulTableAccesses ? static_cast<double>(totalConsecutiveAccesses) / static_cast<double>(successfulTableAccesses) : 0.0;
+  }
 };
 } // namespace dram_open

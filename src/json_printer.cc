@@ -79,12 +79,13 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
     // Row statistics
     statsmap.emplace("ROW_PREFETCH_ROWS_TRACKED", stats.row_open_stats.rowsCreated);
     statsmap.emplace("ROW_PREFETCH_ROWS_ACCESSED", stats.row_open_stats.rowsAccessed);
+    statsmap.emplace("ROW_PREFETCH_CONSECUTIVE_ACCESSES", stats.row_open_stats.totalConsecutiveAccesses);
 
     // Access statistics - coherent naming
     statsmap.emplace("ROW_PREFETCH_SUCCESSFUL_ACCESSES", stats.row_open_stats.successfulTableAccesses);
     statsmap.emplace("ROW_PREFETCH_SUCCESSFUL_ACCESSES_LOADS", stats.row_open_stats.successfulTableAccessesLoads);
     statsmap.emplace("ROW_PREFETCH_SUCCESSFUL_ACCESSES_PREFETCHES", stats.row_open_stats.successfulTableAccessesPrefetches);
-
+    
     // Derived metrics
     statsmap.emplace("ROW_PREFETCH_AVG_ACCESSES_PER_USEFUL_ROW", stats.row_open_stats.getAverageAccessesPerUsefulRow());
     statsmap.emplace("ROW_PREFETCH_AVG_LATENCY_PER_ACCESS", stats.row_open_stats.getAverageLatencyPerAccess());
