@@ -433,10 +433,11 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
 
   assert(!is_speculative_open && "In this version speculative open requests should not be generated");
 
+  auto row_id = MEMORY_CONTROLLER::get_row_identifier(pkt->value().address);
+  dram_open::DramRequestScheduler::getInstance().track_consecutive_access(row_id);
+
   bool table_row_hit = false;
-  dram_open::RowIdentifier row_id;
   if (!perfect_speculative_opening && !row_buffer_hit && !is_speculative_open) {
-    row_id = MEMORY_CONTROLLER::get_row_identifier(pkt->value().address);
     table_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(row_id);
   }
 
