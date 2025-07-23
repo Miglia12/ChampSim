@@ -419,55 +419,44 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
   if (bank_request[op_idx].valid || bank_request[op_idx].under_refresh)
     return progress;
 
-  // Check for physical row buffer hit
+  bool is_speculative_open = pkt->value().type == access_type::DRAM_ROW_OPEN;
+  assert(!is_speculative_open && "In this version speculative open requests should not be generated");
+
+  auto row_id = MEMORY_CONTROLLER::get_row_identifier(pkt->value().address);
   bool row_buffer_hit = bank_request[op_idx].open_row.has_value() && (*bank_request[op_idx].open_row == op_row);
 
-  // Track stats for speculatively opened rows that weren't useful
+  bool was_predicted = false;
+  if (!perfect_speculative_opening && !is_speculative_open) {
+    was_predicted = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(row_id);
+  }
+
+  dram_open::DramRequestScheduler::getInstance().track_consecutive_access(row_id);
+
   if (bank_request[op_idx].open_row.has_value() && bank_request[op_idx].opened_speculatively && !bank_request[op_idx].has_been_accessed && !row_buffer_hit) {
     ++sim_stats.DRAM_ROW_OPEN_USELESS;
     ++sim_stats.DRAM_ROW_OPEN_BANK_CONFLICT;
   }
 
-  // Determine request types
-  bool is_speculative_open = pkt->value().type == access_type::DRAM_ROW_OPEN;
-
-  assert(!is_speculative_open && "In this version speculative open requests should not be generated");
-
-  auto row_id = MEMORY_CONTROLLER::get_row_identifier(pkt->value().address);
-  dram_open::DramRequestScheduler::getInstance().track_consecutive_access(row_id);
-
-  bool table_row_hit = false;
-  if (!perfect_speculative_opening && !row_buffer_hit && !is_speculative_open) {
-    table_row_hit = dram_open::DramRequestScheduler::getInstance().hasMatchingRow(row_id);
-  }
-
-  // Determine if scheduler hit is actually useful
   bool bank_is_idle = !bank_request[op_idx].open_row.has_value();
-  bool table_usefull = table_row_hit && (bank_is_idle || !dram_open::parameters::ENFORCE_BANK_IDLE_CONSTRAINT);
+  bool prediction_helps_activation = was_predicted && !row_buffer_hit && (bank_is_idle || !dram_open::parameters::ENFORCE_BANK_IDLE_CONSTRAINT);
 
-  // Check if perfect speculative opening is helping
   bool perfect_spec_helped = false;
-  if (!row_buffer_hit && pkt->value().type == access_type::LOAD && perfect_speculative_opening ) {
+  if (!row_buffer_hit && pkt->value().type == access_type::LOAD && perfect_speculative_opening) {
     perfect_spec_helped = true;
     ++sim_stats.PERFECT_SPEC_ROW_BUFFER_HITS;
   }
 
-  // Determine if we should skip activation delay
-  bool skip_activation = row_buffer_hit || (table_usefull && !is_speculative_open) || perfect_spec_helped;
+  bool skip_activation = row_buffer_hit || prediction_helps_activation || perfect_spec_helped;
 
-  // Calculate delays
   champsim::chrono::clock::duration activation_delay =
       skip_activation ? champsim::chrono::clock::duration{} : (bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD);
 
   champsim::chrono::clock::duration access_delay = (is_speculative_open && !DRAM_ROW_OPEN_PAYS_TCAS) ? champsim::chrono::clock::duration{} : tCAS;
 
-  // Calculate final ready time
   auto ready_time = current_time + access_delay + activation_delay;
 
-  // Remember if this was a speculative open
   bool was_spec_open = bank_request[op_idx].opened_speculatively;
 
-  // Update bank request
   bank_request[op_idx] = {/* valid */ true,
                           /* row_buffer_hit */ row_buffer_hit,
                           /* need_refresh */ false,
@@ -478,13 +467,11 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
                           /* ready_time */ ready_time,
                           /* pkt */ pkt};
 
-  // Propagate the speculative flag
   if (!is_speculative_open && was_spec_open) {
     bank_request[op_idx].opened_speculatively = true;
   }
 
-  // Mark scheduler row as used only if it was actually beneficial
-  if (table_usefull && !is_speculative_open) {
+  if (was_predicted && !is_speculative_open) {
     uint64_t current_cycle = CACHE::get_llc_cycle();
     dram_open::DramRequestScheduler::getInstance().markRowUsed(row_id, current_cycle, pkt->value().type);
   }

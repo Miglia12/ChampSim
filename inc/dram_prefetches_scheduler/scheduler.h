@@ -19,29 +19,25 @@ class DramRequestScheduler
 {
 private:
   std::unordered_map<RowIdentifier, DramRow> dramRowsMap_;
-
-  // Track simulation-wide statistics per row: {hasBeenUseful, totalAccessCount}
   std::unordered_map<RowIdentifier, std::pair<bool, std::uint64_t>> rowUsageTracking_;
 
-  SchedulerStats stats;
+  struct BankKey {
+    unsigned long channel, rank, bankGroup, bank;
 
+    bool operator==(const BankKey& other) const { return channel == other.channel && rank == other.rank && bankGroup == other.bankGroup && bank == other.bank; }
+  };
+
+  struct BankKeyHash {
+    std::size_t operator()(const BankKey& k) const { return (k.channel << 12) | (k.rank << 8) | (k.bankGroup << 4) | k.bank; }
+  };
+
+  std::unordered_map<BankKey, RowIdentifier, BankKeyHash> lastTrackedRowPerBank_;
+
+  SchedulerStats stats;
+  
   DramRequestScheduler() = default;
 
-  // Helper function to check if two rows are in the same bank
-  bool areSameBank(const RowIdentifier& row1, const RowIdentifier& row2) const
-  {
-    return row1.channel == row2.channel && row1.rank == row2.rank && row1.bankGroup == row2.bankGroup && row1.bank == row2.bank;
-  }
-
-  // Reset consecutive accesses for all tracked rows in the specified bank
-  void resetBankConsecutiveAccesses(const RowIdentifier& accessedRow)
-  {
-    for (auto& [rowID, dramRow] : dramRowsMap_) {
-      if (areSameBank(rowID, accessedRow)) {
-        dramRow.resetConsecutiveAccesses();
-      }
-    }
-  }
+  BankKey getBankKey(const RowIdentifier& row) const { return {row.channel, row.rank, row.bankGroup, row.bank}; }
 
 public:
   static DramRequestScheduler& getInstance()
@@ -55,28 +51,23 @@ public:
 
   void track_consecutive_access(const RowIdentifier& accessedRow)
   {
-    auto it = dramRowsMap_.find(accessedRow);
+    auto bank = getBankKey(accessedRow);
+    auto lastRowIt = lastTrackedRowPerBank_.find(bank);
 
-    if (it == dramRowsMap_.end()) {
-      // Row not in our tracking table
-      resetBankConsecutiveAccesses(accessedRow);
-    } else {
-      // Row is in our tracking table
+    // Check if this row is being tracked
+    bool isTrackedRow = (dramRowsMap_.find(accessedRow) != dramRowsMap_.end());
 
-      // First, reset all OTHER rows in this bank
-      for (auto& [rowID, dramRow] : dramRowsMap_) {
-        if (areSameBank(rowID, accessedRow) && rowID != accessedRow) {
-          dramRow.resetConsecutiveAccesses();
-        }
-      }
-
-      // Then increment this row's counter
-      it->second.incrementConsecutiveAccesses();
-
-      // If this is at least the second consecutive access, count it
-      if (it->second.getConsecutiveAccesses() >= 2) {
+    if (isTrackedRow) {
+      if (lastRowIt != lastTrackedRowPerBank_.end() && lastRowIt->second == accessedRow) {
+        // Same tracked row accessed consecutively
         ++stats.totalConsecutiveAccesses;
+      } else {
+        // First access or different tracked row - update the map
+        lastTrackedRowPerBank_[bank] = accessedRow;
       }
+    } else {
+      // Untracked row accessed - clear any tracked row for this bank
+      lastTrackedRowPerBank_.erase(bank);
     }
   }
 
@@ -144,10 +135,9 @@ public:
 
   void clearAllRows()
   {
-    // Reset all consecutive access counters
-    for (auto& [rowID, dramRow] : dramRowsMap_) {
-      dramRow.resetConsecutiveAccesses();
-    }
+    // Clear consecutive tracking state
+    lastTrackedRowPerBank_.clear();
+
     if (parameters::SYNC_SCHEDULER_WITH_REFRESH) {
       dramRowsMap_.clear();
     }
@@ -155,13 +145,9 @@ public:
 
   void resetStats()
   {
-    // Clear tracked rows
     dramRowsMap_.clear();
-
-    // Reset statistics
+    lastTrackedRowPerBank_.clear();
     stats.reset();
-
-    // Clear simulation-wide tracking for new phase/experiment
     rowUsageTracking_.clear();
   }
 

@@ -13,7 +13,7 @@ class DramRow
 public:
   DramRow() = default;
 
-  DramRow(const RowIdentifier& id, PrefetchRequestPtr req) : rowIdentifier_{id}, latestRequest_{std::move(req)}, consecutiveAccesses_{0}
+  DramRow(const RowIdentifier& id, PrefetchRequestPtr req) : rowIdentifier_{id}, latestRequest_{std::move(req)}
   {
     assert(latestRequest_ && "Initial request must be non-null");
   }
@@ -53,15 +53,9 @@ public:
 
   const RowIdentifier& getRowIdentifier() const noexcept { return rowIdentifier_; }
 
-  // Consecutive access tracking
-  void incrementConsecutiveAccesses() noexcept { ++consecutiveAccesses_; }
-  void resetConsecutiveAccesses() noexcept { consecutiveAccesses_ = 0; }
-  std::uint64_t getConsecutiveAccesses() const noexcept { return consecutiveAccesses_; }
-
 private:
   RowIdentifier rowIdentifier_{};
   PrefetchRequestPtr latestRequest_{};
-  std::uint64_t consecutiveAccesses_{0};
 };
 
 } // namespace dram_open
